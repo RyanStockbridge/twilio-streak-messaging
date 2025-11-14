@@ -122,6 +122,14 @@ export async function POST(request: NextRequest) {
     console.log(`Received SMS from ${fromNumber} to ${toNumber}: ${messageBody}`);
     console.log(`NumMedia: ${numMedia}`);
 
+    // Log media URLs for debugging
+    if (numMedia && parseInt(numMedia) > 0) {
+      for (let i = 0; i < parseInt(numMedia); i++) {
+        console.log(`  MediaUrl${i}: ${body[`MediaUrl${i}`]}`);
+        console.log(`  MediaContentType${i}: ${body[`MediaContentType${i}`]}`);
+      }
+    }
+
     // Forward to Zapier (don't await - run in parallel)
     forwardToZapier(body).catch(err =>
       console.error('Zapier forward error:', err)
@@ -133,62 +141,41 @@ export async function POST(request: NextRequest) {
     // Find or create conversation for this phone number
     const conversation = await findOrCreateConversation(client, fromNumber, toNumber);
 
-    // Twilio automatically adds the SMS to the conversation, but it doesn't include media attributes
-    // We need to wait a moment for the message to be added, then update its attributes with media info
+    // Build media attributes object if media is present
+    let attributes = null;
     if (numMedia && parseInt(numMedia) > 0) {
-      // Wait 2 seconds for Twilio to add the message to the conversation
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const mediaAttrs: any = {
+        MessageSid: messageSid,
+        NumMedia: numMedia
+      };
 
-      try {
-        // Get the most recent message in the conversation
-        const recentMessages = await client.conversations.v1
-          .conversations(conversation.sid)
-          .messages.list({ limit: 5, order: 'desc' });
+      // Add all MediaUrl and MediaContentType fields
+      for (let i = 0; i < parseInt(numMedia); i++) {
+        const mediaUrlKey = `MediaUrl${i}`;
+        const mediaContentTypeKey = `MediaContentType${i}`;
 
-        // Find the message that matches this MessageSid or was just added
-        const targetMessage = recentMessages.find((m: any) => {
-          // Check if it's from the same phone number and around the same time
-          return m.author === fromNumber && m.body === messageBody;
-        });
-
-        if (targetMessage) {
-          // Build media attributes object
-          const mediaAttrs: any = {
-            MessageSid: messageSid,
-            NumMedia: numMedia
-          };
-
-          // Add all MediaUrl and MediaContentType fields
-          for (let i = 0; i < parseInt(numMedia); i++) {
-            const mediaUrlKey = `MediaUrl${i}`;
-            const mediaContentTypeKey = `MediaContentType${i}`;
-
-            if (body[mediaUrlKey]) {
-              mediaAttrs[mediaUrlKey] = body[mediaUrlKey];
-            }
-            if (body[mediaContentTypeKey]) {
-              mediaAttrs[mediaContentTypeKey] = body[mediaContentTypeKey];
-            }
-          }
-
-          // Update the message attributes
-          await client.conversations.v1
-            .conversations(conversation.sid)
-            .messages(targetMessage.sid)
-            .update({
-              attributes: JSON.stringify(mediaAttrs)
-            });
-
-          console.log(`Updated message ${targetMessage.sid} with media attributes`);
-        } else {
-          console.log('Could not find matching message to update with media');
+        if (body[mediaUrlKey]) {
+          mediaAttrs[mediaUrlKey] = body[mediaUrlKey];
         }
-      } catch (error) {
-        console.error('Error updating message with media attributes:', error);
+        if (body[mediaContentTypeKey]) {
+          mediaAttrs[mediaContentTypeKey] = body[mediaContentTypeKey];
+        }
       }
+
+      attributes = JSON.stringify(mediaAttrs);
     }
 
-    console.log(`Message added to conversation ${conversation.sid}`);
+    // Add the message to the conversation manually
+    // Twilio does NOT automatically add SMS to conversations unless you have a Messaging Service
+    const conversationMessage = await client.conversations.v1
+      .conversations(conversation.sid)
+      .messages.create({
+        author: fromNumber,
+        body: messageBody || '',
+        attributes: attributes
+      });
+
+    console.log(`Added message ${conversationMessage.sid} to conversation ${conversation.sid}`);
 
     // Return TwiML response (required for Twilio webhooks)
     return new NextResponse(
