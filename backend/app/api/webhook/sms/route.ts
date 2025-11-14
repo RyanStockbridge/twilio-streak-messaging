@@ -29,7 +29,7 @@ async function findOrCreateConversation(client: any, phoneNumber: string, twilio
 
       // Check if this conversation has the phone number as a participant
       const hasPhoneNumber = participants.some(
-        p => p.messagingBinding?.address === phoneNumber
+        (p: any) => p.messagingBinding?.address === phoneNumber
       );
 
       if (hasPhoneNumber) {
