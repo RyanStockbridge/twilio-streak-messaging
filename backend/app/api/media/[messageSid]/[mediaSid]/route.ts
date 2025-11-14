@@ -23,25 +23,21 @@ function getTwilioClient() {
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { mediaSid: string } }
+  { params }: { params: { messageSid: string; mediaSid: string } }
 ) {
   try {
     // Optional: Verify API key from extension
-    const apiKey = request.headers.get('x-api-key');
-    if (process.env.API_SECRET_KEY && apiKey !== process.env.API_SECRET_KEY) {
+    const apiKeyHeader = request.headers.get('x-api-key');
+    const apiKeyQuery = request.nextUrl.searchParams.get('apiKey');
+    const providedApiKey = apiKeyHeader || apiKeyQuery;
+
+    if (process.env.API_SECRET_KEY && providedApiKey !== process.env.API_SECRET_KEY) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const mediaSid = params.mediaSid;
+    const { messageSid, mediaSid } = params;
 
-    // Extract messageSid and mediaSid from the path
-    // Path should be: /api/media/{messageSid}/{mediaSid}
-    const url = new URL(request.url);
-    const pathParts = url.pathname.split('/');
-    const messageSid = pathParts[pathParts.length - 2];
-    const actualMediaSid = pathParts[pathParts.length - 1];
-
-    if (!messageSid || !actualMediaSid) {
+    if (!messageSid || !mediaSid) {
       return NextResponse.json(
         { error: 'Invalid media URL format. Expected: /api/media/{messageSid}/{mediaSid}' },
         { status: 400 }
@@ -53,7 +49,7 @@ export async function GET(
     const accountSid = process.env.TWILIO_ACCOUNT_SID!;
 
     // Fetch the media from Twilio
-    const mediaUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages/${messageSid}/Media/${actualMediaSid}`;
+    const mediaUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages/${messageSid}/Media/${mediaSid}`;
 
     const response = await fetch(mediaUrl, {
       headers: {

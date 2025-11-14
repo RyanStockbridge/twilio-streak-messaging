@@ -276,6 +276,21 @@ async function callBackendAPI(endpoint, options = {}) {
   return response.json();
 }
 
+function buildMediaUrl(url) {
+  if (!url || !state.apiKey) {
+    return url;
+  }
+
+  try {
+    const parsedUrl = new URL(url, state.backendUrl || undefined);
+    parsedUrl.searchParams.set('apiKey', state.apiKey);
+    return parsedUrl.toString();
+  } catch (error) {
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}apiKey=${encodeURIComponent(state.apiKey)}`;
+  }
+}
+
 async function loadConversations(filterByStreakBoxes = false, append = false) {
   try {
     showLoading(true);
@@ -496,19 +511,21 @@ function renderMessages() {
           const isHeic = mediaItem.contentType.includes('heic') ||
                         mediaItem.contentType.includes('heif') ||
                         (mediaItem.filename && mediaItem.filename.toLowerCase().endsWith('.heic'));
+          const mediaUrl = buildMediaUrl(mediaItem.url);
 
           if (isHeic) {
-            messageContent += `<div class="message-media-unsupported">📷 Image (HEIC format - <a href="${mediaItem.url}" target="_blank">Download to view</a>)</div>`;
+            messageContent += `<div class="message-media-unsupported">📷 Image (HEIC format - <a href="${mediaUrl}" target="_blank">Download to view</a>)</div>`;
           } else {
             // Create unique IDs for this image and error message
             const imageId = `img-${msg.sid}-${mediaIndex}`;
             const errorId = `error-${msg.sid}-${mediaIndex}`;
-            messageContent += `<img id="${imageId}" src="${mediaItem.url}" alt="${mediaItem.filename || 'Image'}" class="message-image" data-error-id="${errorId}" />`;
-            messageContent += `<div id="${errorId}" class="message-media-error" style="display:none;">📷 Image unavailable - <a href="${mediaItem.url}" target="_blank">Try opening directly</a></div>`;
+            messageContent += `<img id="${imageId}" src="${mediaUrl}" alt="${mediaItem.filename || 'Image'}" class="message-image" data-error-id="${errorId}" />`;
+            messageContent += `<div id="${errorId}" class="message-media-error" style="display:none;">📷 Image unavailable - <a href="${mediaUrl}" target="_blank">Try opening directly</a></div>`;
           }
         } else if (mediaItem.contentType) {
           // Show other media types as download links
-          messageContent += `<div class="message-media-other">📎 <a href="${mediaItem.url}" target="_blank">${mediaItem.filename || 'Media file'}</a> (${mediaItem.contentType})</div>`;
+          const mediaUrl = buildMediaUrl(mediaItem.url);
+          messageContent += `<div class="message-media-other">📎 <a href="${mediaUrl}" target="_blank">${mediaItem.filename || 'Media file'}</a> (${mediaItem.contentType})</div>`;
         }
       });
     }
