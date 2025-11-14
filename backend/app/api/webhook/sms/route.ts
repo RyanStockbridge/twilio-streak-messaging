@@ -138,44 +138,68 @@ export async function POST(request: NextRequest) {
     // Get Twilio client
     const client = getTwilioClient();
 
-    // Find or create conversation for this phone number
-    const conversation = await findOrCreateConversation(client, fromNumber, toNumber);
+    // With Autocreate Conversations enabled, Twilio automatically creates the conversation
+    // and adds the message. We just need to find it and add media attributes if present.
 
-    // Build media attributes object if media is present
-    let attributes = null;
+    // Only process if there's media to attach
     if (numMedia && parseInt(numMedia) > 0) {
-      const mediaAttrs: any = {
-        MessageSid: messageSid,
-        NumMedia: numMedia
-      };
+      // Wait 2 seconds for Twilio to auto-create the conversation and add the message
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // Add all MediaUrl and MediaContentType fields
-      for (let i = 0; i < parseInt(numMedia); i++) {
-        const mediaUrlKey = `MediaUrl${i}`;
-        const mediaContentTypeKey = `MediaContentType${i}`;
+      try {
+        // Find the conversation for this phone number
+        const conversation = await findOrCreateConversation(client, fromNumber, toNumber);
 
-        if (body[mediaUrlKey]) {
-          mediaAttrs[mediaUrlKey] = body[mediaUrlKey];
+        // Get the most recent messages in the conversation
+        const recentMessages = await client.conversations.v1
+          .conversations(conversation.sid)
+          .messages.list({ limit: 5, order: 'desc' });
+
+        // Find the message that matches this SMS
+        const targetMessage = recentMessages.find((m: any) => {
+          // Match by author and body (since Twilio auto-created it)
+          return m.author === fromNumber && m.body === messageBody;
+        });
+
+        if (targetMessage) {
+          // Build media attributes object
+          const mediaAttrs: any = {
+            MessageSid: messageSid,
+            NumMedia: numMedia
+          };
+
+          // Add all MediaUrl and MediaContentType fields
+          for (let i = 0; i < parseInt(numMedia); i++) {
+            const mediaUrlKey = `MediaUrl${i}`;
+            const mediaContentTypeKey = `MediaContentType${i}`;
+
+            if (body[mediaUrlKey]) {
+              mediaAttrs[mediaUrlKey] = body[mediaUrlKey];
+            }
+            if (body[mediaContentTypeKey]) {
+              mediaAttrs[mediaContentTypeKey] = body[mediaContentTypeKey];
+            }
+          }
+
+          // Update the message with media attributes
+          await client.conversations.v1
+            .conversations(conversation.sid)
+            .messages(targetMessage.sid)
+            .update({
+              attributes: JSON.stringify(mediaAttrs)
+            });
+
+          console.log(`Updated message ${targetMessage.sid} with media attributes in conversation ${conversation.sid}`);
+        } else {
+          console.log('Could not find auto-created message to update with media');
         }
-        if (body[mediaContentTypeKey]) {
-          mediaAttrs[mediaContentTypeKey] = body[mediaContentTypeKey];
-        }
+      } catch (error) {
+        console.error('Error updating message with media attributes:', error);
       }
-
-      attributes = JSON.stringify(mediaAttrs);
+    } else {
+      // No media - just let Twilio's autocreate handle everything
+      console.log('No media present, Twilio autocreate will handle the message');
     }
-
-    // Add the message to the conversation manually
-    // Twilio does NOT automatically add SMS to conversations unless you have a Messaging Service
-    const conversationMessage = await client.conversations.v1
-      .conversations(conversation.sid)
-      .messages.create({
-        author: fromNumber,
-        body: messageBody || '',
-        attributes: attributes
-      });
-
-    console.log(`Added message ${conversationMessage.sid} to conversation ${conversation.sid}`);
 
     // Return TwiML response (required for Twilio webhooks)
     return new NextResponse(
