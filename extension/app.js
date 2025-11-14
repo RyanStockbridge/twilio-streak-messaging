@@ -455,7 +455,7 @@ function selectConversation(conversation) {
   if (conversation.contactBoxKey) {
     openStreakBtn.classList.remove('hidden');
     openStreakBtn.onclick = () => {
-      window.open(`https://app.streak.com/box/${conversation.contactBoxKey}`, '_blank');
+      window.open(`https://mail.google.com/mail/u/0/#box/${conversation.contactBoxKey}`, '_blank');
     };
   } else {
     openStreakBtn.classList.add('hidden');
@@ -485,10 +485,44 @@ function renderMessages() {
     const isOutgoing = msg.author === state.streakEmail || msg.author === 'system';
     const messageEl = document.createElement('div');
     messageEl.className = `message ${isOutgoing ? 'outgoing' : 'incoming'}`;
-    messageEl.innerHTML = `
-      <div class="message-body">${escapeHtml(msg.body)}</div>
-      <div class="message-time">${formatDate(msg.dateCreated)}</div>
-    `;
+
+    let messageContent = '';
+
+    // Add media (images) if present
+    if (msg.media && msg.media.length > 0) {
+      msg.media.forEach(mediaItem => {
+        if (mediaItem.contentType && mediaItem.contentType.startsWith('image/')) {
+          messageContent += `<img src="${mediaItem.url}" alt="${mediaItem.filename || 'Image'}" class="message-image" />`;
+        }
+      });
+    }
+
+    // Add text body if present
+    if (msg.body) {
+      messageContent += `<div class="message-body">${escapeHtml(msg.body)}</div>`;
+    }
+
+    // Determine sender name for the timestamp
+    let senderName = '';
+    if (isOutgoing) {
+      // For outgoing messages, use the Streak email or first name
+      if (msg.author === state.streakEmail) {
+        // Extract first name from email if possible
+        const emailName = msg.author.split('@')[0].split('.').map(part =>
+          part.charAt(0).toUpperCase() + part.slice(1)
+        ).join(' ');
+        senderName = emailName;
+      } else {
+        senderName = msg.author;
+      }
+    } else {
+      // For incoming messages, use the contact name if available
+      senderName = state.currentConversation?.contactName || 'Contact';
+    }
+
+    messageContent += `<div class="message-time">${formatDate(msg.dateCreated)} from ${escapeHtml(senderName)}</div>`;
+
+    messageEl.innerHTML = messageContent;
     messagesContainer.appendChild(messageEl);
   });
 

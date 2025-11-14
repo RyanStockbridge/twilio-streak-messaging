@@ -5,7 +5,8 @@
       "Bash(git commit -m \"$(cat <<''EOF''\nInitial commit: Twilio Streak Messaging Chrome Extension\n\nFeatures:\n- Chrome extension with side panel UI\n- Twilio Conversations API integration\n- Streak CRM integration with role-based access control\n- Contact name lookup and caching\n- Real-time message updates (5-second polling)\n- Conversation filtering by Streak boxes\n- Pagination support (50 conversations per page)\n- Toast notifications for better UX\n- Secure CORS configuration\n- Next.js backend API deployed to Vercel\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(git remote add:*)",
       "Bash(git branch:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(sips:*)"
     ],
     "deny": [],
     "ask": []

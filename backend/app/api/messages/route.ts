@@ -39,14 +39,40 @@ export async function GET(request: NextRequest) {
       .conversations(conversationSid)
       .messages.list({ limit: 100, order: 'desc' });
 
-    const formattedMessages = messages.map(msg => ({
-      sid: msg.sid,
-      author: msg.author,
-      body: msg.body,
-      dateCreated: msg.dateCreated,
-      index: msg.index,
-      participantSid: msg.participantSid,
-      attributes: msg.attributes
+    const formattedMessages = await Promise.all(messages.map(async (msg) => {
+      // Fetch media if present
+      let media = null;
+      if (msg.media) {
+        try {
+          const mediaList = await client.conversations.v1
+            .conversations(conversationSid)
+            .messages(msg.sid)
+            .media.list();
+
+          if (mediaList.length > 0) {
+            media = mediaList.map(m => ({
+              sid: m.sid,
+              contentType: m.contentType,
+              filename: m.filename,
+              size: m.size,
+              url: m.url
+            }));
+          }
+        } catch (error) {
+          console.error(`Error fetching media for message ${msg.sid}:`, error);
+        }
+      }
+
+      return {
+        sid: msg.sid,
+        author: msg.author,
+        body: msg.body,
+        dateCreated: msg.dateCreated,
+        index: msg.index,
+        participantSid: msg.participantSid,
+        attributes: msg.attributes,
+        media: media
+      };
     }));
 
     return NextResponse.json({
