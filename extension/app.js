@@ -111,14 +111,20 @@ async function verifyStreakAccess() {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to fetch teams');
+      const errorText = await response.text();
+      console.error('Streak API error:', errorText);
+      throw new Error(`Failed to fetch teams: ${response.status}`);
     }
 
     const teams = await response.json();
-    state.userTeams = teams;
+    console.log('Streak teams response:', teams);
+
+    // Handle both array and object responses
+    const teamsArray = Array.isArray(teams) ? teams : (teams.results || []);
+    state.userTeams = teamsArray;
 
     // Check if user has access (is Owner or Member)
-    const hasAccess = teams.some(team => {
+    const hasAccess = teamsArray.some(team => {
       const members = team.members || [];
       return members.some(member =>
         member.email === state.streakEmail &&
