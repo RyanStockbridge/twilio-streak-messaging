@@ -52,15 +52,15 @@
       <div class="header">
         <h2>Messages</h2>
         <div class="header-actions">
-          <label class="filter-toggle" title="Only show conversations with contacts in Streak boxes">
-            <input type="checkbox" id="filter-by-streak">
-            <span>Filter by Streak</span>
-          </label>
           <button id="refresh-btn" class="btn btn-icon" title="Refresh">
-            <span>↻</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 4v6h6M20 20v-6h-6M20 9a8 8 0 0 0-13.3-4.7L4 6M4 15a8 8 0 0 0 13.3 4.7L20 18" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
           </button>
           <button id="logout-btn" class="btn btn-icon" title="Logout">
-            <span>⚙</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3a9 9 0 1 0 9 9M15 9h6v6h-6M21 12H9" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
           </button>
         </div>
       </div>
@@ -81,12 +81,19 @@
       <!-- Message Thread -->
       <div id="message-thread" class="message-thread hidden">
         <div class="thread-header">
-          <button id="back-btn" class="btn btn-icon">←</button>
+          <button id="back-btn" class="btn btn-icon" title="Back">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6M9 12h12" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
           <div class="thread-info">
             <h3 id="thread-name">Contact Name</h3>
             <p id="thread-phone">+1 555-555-5555</p>
           </div>
           <button id="open-streak-btn" class="btn btn-small" title="Open in Streak">
+            <svg viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px;margin-right:6px;">
+              <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
             Streak
           </button>
         </div>
@@ -96,8 +103,19 @@
         </div>
 
         <div class="message-input-container">
-          <textarea id="message-input" placeholder="Type a message..."></textarea>
-          <button id="send-btn" class="btn btn-primary">Send</button>
+          <div class="composer-main">
+            <div id="attachment-preview" class="attachment-preview hidden"></div>
+            <textarea id="message-input" placeholder="Type a message..."></textarea>
+          </div>
+          <div class="composer-actions">
+            <input type="file" id="media-input" class="media-input" multiple accept="image/*,video/*,audio/*,.pdf,.heic,.heif,.doc,.docx,.xls,.xlsx">
+            <button id="add-media-btn" class="btn btn-icon" type="button" title="Add attachment">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 16.5V7a4 4 0 0 0-8 0v11a3 3 0 0 1-6 0V8.5a2.5 2.5 0 0 1 5 0v9" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button id="send-btn" class="btn btn-primary">Send</button>
+          </div>
         </div>
       </div>
     </div>

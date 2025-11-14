@@ -1,4 +1,6 @@
 // Application state
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
 const state = {
   streakEmail: null,
   streakApiKey: null,
@@ -13,7 +15,8 @@ const state = {
   conversationOffset: 0,
   hasMoreConversations: true,
   autoRefreshInterval: null,
-  autoRefreshEnabled: true
+  autoRefreshEnabled: true,
+  pendingMedia: []
 };
 
 // DOM Elements
@@ -31,11 +34,13 @@ const backBtn = document.getElementById('back-btn');
 const refreshBtn = document.getElementById('refresh-btn');
 const loadingIndicator = document.getElementById('loading');
 const openStreakBtn = document.getElementById('open-streak-btn');
-const filterByStreakCheckbox = document.getElementById('filter-by-streak');
 const toast = document.getElementById('toast');
 const toastMessage = document.getElementById('toast-message');
 const loadMoreBtn = document.getElementById('load-more-btn');
 const loadMoreContainer = document.getElementById('load-more-container');
+const addMediaBtn = document.getElementById('add-media-btn');
+const mediaInput = document.getElementById('media-input');
+const attachmentPreview = document.getElementById('attachment-preview');
 
 // Initialize app
 async function init() {
@@ -175,89 +180,16 @@ async function searchStreakContact(phoneNumber) {
   }
 }
 
-async function getStreakBoxes() {
-  try {
-    // Get all pipelines the user has access to
-    const response = await fetch('https://api.streak.com/api/v2/pipelines', {
-      headers: {
-        'Authorization': `Basic ${btoa(state.streakApiKey + ':')}`
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch pipelines');
-    }
-
-    const pipelines = await response.json();
-
-    // Get all boxes from all pipelines
-    const allBoxes = [];
-    for (const pipeline of pipelines) {
-      const boxesResponse = await fetch(`https://api.streak.com/api/v2/pipelines/${pipeline.key}/boxes`, {
-        headers: {
-          'Authorization': `Basic ${btoa(state.streakApiKey + ':')}`
-        }
-      });
-
-      if (boxesResponse.ok) {
-        const boxes = await boxesResponse.json();
-        allBoxes.push(...boxes);
-      }
-    }
-
-    return allBoxes;
-  } catch (error) {
-    console.error('Error fetching Streak boxes:', error);
-    return [];
-  }
-}
-
-function extractPhoneNumbersFromBoxes(boxes) {
-  const phoneNumbers = new Set();
-  const phoneRegex = /(\+?1?\s*\(?[2-9]\d{2}\)?[\s.-]?\d{3}[\s.-]?\d{4})/g;
-
-  boxes.forEach(box => {
-    // Check box fields for phone numbers
-    if (box.fields) {
-      Object.values(box.fields).forEach(field => {
-        if (typeof field === 'string') {
-          const matches = field.match(phoneRegex);
-          if (matches) {
-            matches.forEach(match => {
-              // Clean the phone number
-              const cleaned = match.replace(/[\s\-\(\)\.]/g, '');
-              if (cleaned.length >= 10) {
-                phoneNumbers.add(cleaned);
-              }
-            });
-          }
-        }
-      });
-    }
-
-    // Check notes for phone numbers
-    if (box.notes) {
-      const matches = box.notes.match(phoneRegex);
-      if (matches) {
-        matches.forEach(match => {
-          const cleaned = match.replace(/[\s\-\(\)\.]/g, '');
-          if (cleaned.length >= 10) {
-            phoneNumbers.add(cleaned);
-          }
-        });
-      }
-    }
-  });
-
-  return Array.from(phoneNumbers);
-}
-
 // Backend API functions
 async function callBackendAPI(endpoint, options = {}) {
+  const isFormData = options.body instanceof FormData;
   const headers = {
-    'Content-Type': 'application/json',
     ...options.headers
   };
+
+  if (!isFormData) {
+    headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+  }
 
   if (state.apiKey) {
     headers['x-api-key'] = state.apiKey;
@@ -269,11 +201,21 @@ async function callBackendAPI(endpoint, options = {}) {
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'API request failed');
+    let errorMessage = 'API request failed';
+    try {
+      const errorBody = await response.json();
+      errorMessage = errorBody.error || errorMessage;
+    } catch (err) {
+      // ignore JSON parse errors
+    }
+    throw new Error(errorMessage);
   }
 
-  return response.json();
+  try {
+    return await response.json();
+  } catch (error) {
+    return {};
+  }
 }
 
 function buildMediaUrl(url) {
@@ -291,7 +233,7 @@ function buildMediaUrl(url) {
   }
 }
 
-async function loadConversations(filterByStreakBoxes = false, append = false) {
+async function loadConversations(append = false) {
   try {
     showLoading(true);
 
@@ -301,16 +243,6 @@ async function loadConversations(filterByStreakBoxes = false, append = false) {
     }
 
     let apiUrl = `/api/conversations?limit=${state.conversationLimit}`;
-
-    // Optionally filter by phone numbers found in Streak boxes
-    if (filterByStreakBoxes) {
-      const boxes = await getStreakBoxes();
-      const phoneNumbers = extractPhoneNumbersFromBoxes(boxes);
-
-      if (phoneNumbers.length > 0) {
-        apiUrl += `&phoneNumbers=${phoneNumbers.join(',')}`;
-      }
-    }
 
     const data = await callBackendAPI(apiUrl);
 
@@ -385,31 +317,61 @@ function stopAutoRefresh() {
 }
 
 async function sendMessage() {
+  if (!state.currentConversation) return;
+
   const message = messageInput.value.trim();
-  if (!message || !state.currentConversation) return;
+  const hasMedia = state.pendingMedia.length > 0;
+
+  if (!message && !hasMedia) return;
 
   try {
     sendBtn.disabled = true;
+    if (addMediaBtn) {
+      addMediaBtn.disabled = true;
+    }
+    sendBtn.textContent = 'Sending...';
 
-    await callBackendAPI('/api/send-message', {
-      method: 'POST',
-      body: JSON.stringify({
-        conversationSid: state.currentConversation.sid,
-        message: message,
-        author: state.streakEmail
-      })
-    });
+    if (hasMedia) {
+      const formData = new FormData();
+      formData.append('conversationSid', state.currentConversation.sid);
+      formData.append('author', state.streakEmail);
+      if (message) {
+        formData.append('message', message);
+      }
 
-    messageInput.value = '';
+      state.pendingMedia.forEach(file => {
+        formData.append('media', file, file.name);
+      });
+
+      await callBackendAPI('/api/send-message', {
+        method: 'POST',
+        body: formData
+      });
+    } else {
+      await callBackendAPI('/api/send-message', {
+        method: 'POST',
+        body: JSON.stringify({
+          conversationSid: state.currentConversation.sid,
+          message: message,
+          author: state.streakEmail
+        })
+      });
+    }
+
+    resetComposer();
 
     // Reload messages to show the sent message
     await loadMessages(state.currentConversation.sid);
     showToast('Message sent successfully', 'success');
   } catch (error) {
     console.error('Error sending message:', error);
-    showToast('Failed to send message. Please check your connection and try again.', 'error');
+    showToast(error.message || 'Failed to send message. Please check your connection and try again.', 'error');
   } finally {
     sendBtn.disabled = false;
+    if (addMediaBtn) {
+      addMediaBtn.disabled = false;
+    }
+    sendBtn.textContent = 'Send';
   }
 }
 
@@ -460,6 +422,7 @@ function renderConversationList() {
 
 function selectConversation(conversation) {
   state.currentConversation = conversation;
+  resetComposer();
 
   // Update UI
   document.getElementById('thread-name').textContent = conversation.contactName || 'Unknown Contact';
@@ -588,6 +551,57 @@ function renderMessages() {
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
+function renderAttachmentPreview() {
+  if (!attachmentPreview) return;
+
+  attachmentPreview.innerHTML = '';
+
+  if (!state.pendingMedia.length) {
+    attachmentPreview.classList.add('hidden');
+    return;
+  }
+
+  attachmentPreview.classList.remove('hidden');
+
+  state.pendingMedia.forEach((file, index) => {
+    const chip = document.createElement('div');
+    chip.className = 'attachment-chip';
+    chip.innerHTML = `
+      <span class="attachment-chip__icon">📎</span>
+      <span class="attachment-chip__name">${escapeHtml(file.name || `Attachment ${index + 1}`)}</span>
+      <span class="attachment-chip__size">${formatFileSize(file.size)}</span>
+      <button class="attachment-chip__remove" data-index="${index}" type="button" aria-label="Remove attachment">&times;</button>
+    `;
+    attachmentPreview.appendChild(chip);
+  });
+
+  attachmentPreview.querySelectorAll('.attachment-chip__remove').forEach(button => {
+    button.addEventListener('click', (event) => {
+      const target = event.currentTarget;
+      const idx = Number(target.getAttribute('data-index'));
+      if (!Number.isNaN(idx)) {
+        state.pendingMedia.splice(idx, 1);
+        renderAttachmentPreview();
+      }
+    });
+  });
+}
+
+function clearPendingMedia() {
+  state.pendingMedia = [];
+  if (mediaInput) {
+    mediaInput.value = '';
+  }
+  renderAttachmentPreview();
+}
+
+function resetComposer() {
+  if (messageInput) {
+    messageInput.value = '';
+  }
+  clearPendingMedia();
+}
+
 // Utility functions
 function formatDate(dateString) {
   const date = new Date(dateString);
@@ -603,6 +617,24 @@ function formatDate(dateString) {
   if (diffDays < 7) return `${diffDays}d ago`;
 
   return date.toLocaleDateString();
+}
+
+function formatFileSize(bytes) {
+  if (typeof bytes !== 'number' || Number.isNaN(bytes)) {
+    return '0 B';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = bytes;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+
+  const precision = unitIndex === 0 ? 0 : 1;
+  return `${size.toFixed(precision)} ${units[unitIndex]}`;
 }
 
 function escapeHtml(text) {
@@ -662,6 +694,7 @@ logoutBtn.addEventListener('click', async () => {
     state.conversations = [];
     state.currentConversation = null;
     state.messages = [];
+    resetComposer();
     showLoginScreen();
   }
 });
@@ -670,6 +703,7 @@ backBtn.addEventListener('click', () => {
   stopAutoRefresh();
   state.currentConversation = null;
   state.messages = [];
+  resetComposer();
   conversationList.classList.remove('hidden');
   messageThread.classList.add('hidden');
 
@@ -680,23 +714,52 @@ backBtn.addEventListener('click', () => {
 });
 
 refreshBtn.addEventListener('click', async () => {
-  const filterEnabled = filterByStreakCheckbox.checked;
-  await loadConversations(filterEnabled);
-});
-
-filterByStreakCheckbox.addEventListener('change', async () => {
-  const filterEnabled = filterByStreakCheckbox.checked;
-  await loadConversations(filterEnabled);
+  await loadConversations();
 });
 
 loadMoreBtn.addEventListener('click', async () => {
-  const filterEnabled = filterByStreakCheckbox.checked;
   loadMoreBtn.disabled = true;
   loadMoreBtn.textContent = 'Loading...';
-  await loadConversations(filterEnabled, true);
+  await loadConversations(true);
   loadMoreBtn.disabled = false;
   loadMoreBtn.textContent = 'Load More';
 });
+
+if (addMediaBtn && mediaInput) {
+  addMediaBtn.addEventListener('click', () => {
+    if (!state.currentConversation) {
+      showToast('Select a conversation before attaching media.', 'info');
+      return;
+    }
+    mediaInput.click();
+  });
+
+  mediaInput.addEventListener('change', (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) {
+      return;
+    }
+
+    let combinedSize = state.pendingMedia.reduce((sum, file) => sum + file.size, 0);
+    const acceptedFiles = [];
+
+    for (const file of files) {
+      if (combinedSize + file.size > MAX_ATTACHMENT_BYTES) {
+        showToast(`Attachments limited to ${(MAX_ATTACHMENT_BYTES / (1024 * 1024)).toFixed(0)} MB per message.`, 'error');
+        break;
+      }
+      acceptedFiles.push(file);
+      combinedSize += file.size;
+    }
+
+    if (acceptedFiles.length) {
+      state.pendingMedia.push(...acceptedFiles);
+      renderAttachmentPreview();
+    }
+
+    mediaInput.value = '';
+  });
+}
 
 sendBtn.addEventListener('click', sendMessage);
 

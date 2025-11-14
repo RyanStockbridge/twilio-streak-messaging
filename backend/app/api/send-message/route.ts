@@ -14,6 +14,55 @@ function getTwilioClient() {
   return twilio(accountSid, authToken);
 }
 
+async function uploadMediaFile(
+  serviceSid: string,
+  file: File,
+  accountSid: string,
+  authToken: string
+) {
+  const region = process.env.TWILIO_REGION || 'us1';
+  const uploadUrl = `https://mcs.${region}.twilio.com/v1/Services/${serviceSid}/Media`;
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  const contentType = file.type || 'application/octet-stream';
+  const filename = file.name || `attachment-${Date.now()}`;
+
+  const formData = new FormData();
+  formData.append('Filename', filename);
+  formData.append('ContentType', contentType);
+  formData.append('Media', new Blob([buffer], { type: contentType }), filename);
+
+  const response = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64')
+    },
+    body: formData
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to upload media to Twilio (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.sid as string;
+}
+
+async function uploadMediaFiles(
+  serviceSid: string,
+  files: File[],
+  accountSid: string,
+  authToken: string
+) {
+  const uploadedSids: string[] = [];
+  for (const file of files) {
+    const sid = await uploadMediaFile(serviceSid, file, accountSid, authToken);
+    uploadedSids.push(sid);
+  }
+  return uploadedSids;
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Optional: Verify API key from extension
@@ -22,26 +71,90 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { conversationSid, message, author } = body;
+    const contentType = request.headers.get('content-type') || '';
+    let conversationSid: string | null = null;
+    let rawMessage: string | null = null;
+    let author = 'system';
+    let mediaFiles: File[] = [];
 
-    if (!conversationSid || !message) {
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await request.formData();
+      const conversationField = formData.get('conversationSid');
+      conversationSid = typeof conversationField === 'string' ? conversationField : null;
+
+      const messageField = formData.get('message');
+      rawMessage = typeof messageField === 'string' ? messageField : null;
+
+      const authorField = formData.get('author');
+      if (typeof authorField === 'string' && authorField.trim()) {
+        author = authorField;
+      }
+
+      mediaFiles = formData
+        .getAll('media')
+        .filter((item): item is File => item instanceof File);
+    } else {
+      const body = await request.json();
+      conversationSid = body.conversationSid;
+      rawMessage = body.message;
+      if (body.author) {
+        author = body.author;
+      }
+    }
+
+    const message = typeof rawMessage === 'string' ? rawMessage.trim() : '';
+
+    if (!conversationSid) {
       return NextResponse.json(
-        { error: 'conversationSid and message are required' },
+        { error: 'conversationSid is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!message && mediaFiles.length === 0) {
+      return NextResponse.json(
+        { error: 'Message text or media attachment is required' },
         { status: 400 }
       );
     }
 
     // Get Twilio client
     const client = getTwilioClient();
+    const accountSid = process.env.TWILIO_ACCOUNT_SID!;
+    const authToken = process.env.TWILIO_AUTH_TOKEN!;
+
+    let mediaSids: string[] = [];
+
+    if (mediaFiles.length > 0) {
+      const conversation = await client.conversations.v1
+        .conversations(conversationSid)
+        .fetch();
+
+      const serviceSid = conversation.chatServiceSid;
+
+      if (!serviceSid) {
+        throw new Error('Conversation is missing chat service SID required for media uploads');
+      }
+
+      mediaSids = await uploadMediaFiles(serviceSid, mediaFiles, accountSid, authToken);
+    }
+
+    const payload: any = {
+      author: author || 'system'
+    };
+
+    if (message) {
+      payload.body = message;
+    }
+
+    if (mediaSids.length > 0) {
+      payload.mediaSid = mediaSids;
+    }
 
     // Send message in the conversation
     const sentMessage = await client.conversations.v1
       .conversations(conversationSid)
-      .messages.create({
-        body: message,
-        author: author || 'system'
-      });
+      .messages.create(payload);
 
     return NextResponse.json({
       success: true,
