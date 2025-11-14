@@ -40,18 +40,15 @@ async function findOrCreateConversation(client: any, phoneNumber: string, twilio
     // No conversation found, create a new one
     console.log(`Creating new conversation for ${phoneNumber}`);
     const newConversation = await client.conversations.v1.conversations.create({
-      friendlyName: `SMS with ${phoneNumber}`,
-      messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID
+      friendlyName: `SMS with ${phoneNumber}`
     });
 
-    // Add the phone number as a participant
+    // Add the phone number as a participant with proper SMS binding
     await client.conversations.v1
       .conversations(newConversation.sid)
       .participants.create({
-        messagingBinding: {
-          address: phoneNumber,
-          proxyAddress: twilioNumber
-        }
+        'messagingBinding.address': phoneNumber,
+        'messagingBinding.proxyAddress': twilioNumber
       });
 
     console.log(`Created conversation ${newConversation.sid} for ${phoneNumber}`);
