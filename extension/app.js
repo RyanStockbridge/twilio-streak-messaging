@@ -492,7 +492,20 @@ function renderMessages() {
     if (msg.media && msg.media.length > 0) {
       msg.media.forEach(mediaItem => {
         if (mediaItem.contentType && mediaItem.contentType.startsWith('image/')) {
-          messageContent += `<img src="${mediaItem.url}" alt="${mediaItem.filename || 'Image'}" class="message-image" />`;
+          // Check if it's HEIC format (not supported by browsers)
+          const isHeic = mediaItem.contentType.includes('heic') ||
+                        mediaItem.contentType.includes('heif') ||
+                        (mediaItem.filename && mediaItem.filename.toLowerCase().endsWith('.heic'));
+
+          if (isHeic) {
+            messageContent += `<div class="message-media-unsupported">📷 Image (HEIC format - <a href="${mediaItem.url}" target="_blank">Download to view</a>)</div>`;
+          } else {
+            messageContent += `<img src="${mediaItem.url}" alt="${mediaItem.filename || 'Image'}" class="message-image" onerror="this.style.display='none';this.nextElementSibling.style.display='block';" />`;
+            messageContent += `<div class="message-media-error" style="display:none;">📷 Image unavailable - <a href="${mediaItem.url}" target="_blank">Try opening directly</a></div>`;
+          }
+        } else if (mediaItem.contentType) {
+          // Show other media types as download links
+          messageContent += `<div class="message-media-other">📎 <a href="${mediaItem.url}" target="_blank">${mediaItem.filename || 'Media file'}</a> (${mediaItem.contentType})</div>`;
         }
       });
     }

@@ -39,20 +39,73 @@ export async function GET(request: NextRequest) {
       .conversations(conversationSid)
       .messages.list({ limit: 100, order: 'desc' });
 
-    const formattedMessages = messages.map(msg => {
-      // Extract media if present in the message object
+    // Fetch media for each message that has attachments
+    const formattedMessages = await Promise.all(messages.map(async (msg) => {
       let media = null;
       const msgAny = msg as any;
 
-      // Check if media exists on the message object
-      if (msgAny.media && Array.isArray(msgAny.media) && msgAny.media.length > 0) {
-        media = msgAny.media.map((m: any) => ({
-          sid: m.sid,
-          contentType: m.content_type || m.contentType,
-          filename: m.filename,
-          size: m.size,
-          url: m.url
-        }));
+      // Check if message has media (NumMedia field or media property)
+      const hasMedia = msgAny.delivery?.total > 0 || msgAny.media ||
+                      (msgAny.attributes && JSON.parse(msgAny.attributes || '{}').NumMedia);
+
+      if (hasMedia) {
+        try {
+          // Fetch media using the REST API directly
+          const accountSid = process.env.TWILIO_ACCOUNT_SID;
+          const authToken = process.env.TWILIO_AUTH_TOKEN;
+          const authHeader = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+
+          const mediaResponse = await fetch(
+            `https://conversations.twilio.com/v1/Conversations/${conversationSid}/Messages/${msg.sid}`,
+            {
+              headers: {
+                'Authorization': `Basic ${authHeader}`
+              }
+            }
+          );
+
+          if (mediaResponse.ok) {
+            const messageData = await mediaResponse.json();
+
+            // Check if media links exist
+            if (messageData.links && messageData.links.delivery_receipts) {
+              // Try to fetch media from the message's media endpoint
+              const mediaListResponse = await fetch(
+                `https://conversations.twilio.com/v1/Conversations/${conversationSid}/Messages/${msg.sid}/Receipts`,
+                {
+                  headers: {
+                    'Authorization': `Basic ${authHeader}`
+                  }
+                }
+              );
+            }
+
+            // Parse attributes for MMS media URLs
+            if (messageData.attributes) {
+              const attrs = JSON.parse(messageData.attributes);
+              if (attrs.media && Array.isArray(attrs.media)) {
+                media = attrs.media.map((m: any) => ({
+                  sid: m.sid || '',
+                  contentType: m.content_type || m.contentType || 'image/jpeg',
+                  filename: m.filename || 'image',
+                  size: m.size || 0,
+                  url: m.url || ''
+                }));
+              } else if (attrs.MediaUrl0) {
+                // Legacy MMS format
+                media = [{
+                  sid: msg.sid,
+                  contentType: attrs.MediaContentType0 || 'image/jpeg',
+                  filename: 'image',
+                  size: 0,
+                  url: attrs.MediaUrl0
+                }];
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`Error fetching media for message ${msg.sid}:`, error);
+        }
       }
 
       return {
@@ -65,7 +118,7 @@ export async function GET(request: NextRequest) {
         attributes: msg.attributes,
         media: media
       };
-    });
+    }));
 
     return NextResponse.json({
       messages: formattedMessages.reverse(), // Return in chronological order

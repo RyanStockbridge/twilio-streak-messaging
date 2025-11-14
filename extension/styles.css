@@ -427,6 +427,41 @@ body {
   opacity: 0.9;
 }
 
+.message-media-unsupported,
+.message-media-error,
+.message-media-other {
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.message.outgoing .message-media-unsupported,
+.message.outgoing .message-media-error,
+.message.outgoing .message-media-other {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.message-media-unsupported a,
+.message-media-error a,
+.message-media-other a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.message.incoming .message-media-unsupported a,
+.message.incoming .message-media-error a,
+.message.incoming .message-media-other a {
+  color: #3498db;
+}
+
+.message.outgoing .message-media-unsupported a,
+.message.outgoing .message-media-error a,
+.message.outgoing .message-media-other a {
+  color: white;
+}
+
 .message-time {
   font-size: 10px;
   margin-top: 4px;
@@ -439,12 +474,15 @@ body {
   border-top: 1px solid #e0e0e0;
   background: white;
   display: flex;
+  flex-direction: row;
   gap: 10px;
   align-items: flex-end;
+  flex-shrink: 0;
 }
 
 #message-input {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 200px;
   padding: 10px 12px;
   min-height: 44px;
   max-height: 120px;
@@ -452,8 +490,10 @@ body {
   border-radius: 8px;
   font-size: 14px;
   font-family: inherit;
-  resize: vertical;
+  resize: none;
   line-height: 1.4;
+  box-sizing: border-box;
+  overflow-y: auto;
 }
 
 #message-input:focus {
