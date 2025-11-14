@@ -136,10 +136,7 @@ async function searchStreakContact(phoneNumber) {
   }
 
   try {
-    // Clean phone number for search (remove +1, spaces, dashes)
-    const cleanNumber = phoneNumber.replace(/[\s\-\+]/g, '').slice(-10);
-
-    const response = await fetch(`https://api.streak.com/api/v1/search?query=${encodeURIComponent(cleanNumber)}`, {
+    const response = await fetch(`https://api.streak.com/api/v1/search?query=${encodeURIComponent(phoneNumber)}`, {
       headers: {
         'Authorization': `Basic ${btoa(state.streakApiKey + ':')}`
       }
@@ -149,15 +146,19 @@ async function searchStreakContact(phoneNumber) {
       throw new Error('Failed to search Streak');
     }
 
-    const results = await response.json();
+    const data = await response.json();
 
-    // Look for contact in results
-    if (results.results && results.results.length > 0) {
-      const contact = results.results[0];
+    // Check if we have contacts in the results
+    if (data.results && data.results.contacts && data.results.contacts.length > 0) {
+      const contact = data.results.contacts[0];
+      const fullName = [contact.givenName, contact.familyName].filter(Boolean).join(' ');
+
       const contactInfo = {
-        name: contact.displayName || contact.email || phoneNumber,
-        boxKey: contact.boxKey,
-        email: contact.email
+        name: fullName || contact.emailAddresses?.[0] || phoneNumber,
+        boxKey: contact.key,
+        email: contact.emailAddresses?.[0] || null,
+        givenName: contact.givenName,
+        familyName: contact.familyName
       };
 
       // Cache the result

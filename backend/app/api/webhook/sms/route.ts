@@ -129,18 +129,10 @@ export async function POST(request: NextRequest) {
     const client = getTwilioClient();
 
     // Find or create conversation for this phone number
+    // Once a conversation has SMS participants, Twilio automatically adds incoming SMS to it
     const conversation = await findOrCreateConversation(client, fromNumber, toNumber);
 
-    // Add the message to the conversation
-    await client.conversations.v1
-      .conversations(conversation.sid)
-      .messages.create({
-        body: messageBody,
-        author: fromNumber,
-        xTwilioWebhookEnabled: 'true' // This helps track the original SMS
-      });
-
-    console.log(`Added message to conversation ${conversation.sid}`);
+    console.log(`Message will be automatically added to conversation ${conversation.sid}`);
 
     // Return TwiML response (required for Twilio webhooks)
     return new NextResponse(

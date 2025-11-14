@@ -24,6 +24,7 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .hidden {
@@ -337,7 +338,11 @@ body {
 
 /* Message Thread */
 .message-thread {
-  flex: 1;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   flex-direction: column;
   background: white;
@@ -422,11 +427,14 @@ body {
   background: white;
   display: flex;
   gap: 10px;
+  align-items: flex-end;
 }
 
 #message-input {
   flex: 1;
   padding: 10px 12px;
+  min-height: 80px;
+  max-height: 150px;
   border: 1px solid #ddd;
   border-radius: 4px;
   font-size: 14px;
