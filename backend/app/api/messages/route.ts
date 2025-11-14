@@ -24,6 +24,9 @@ export async function GET(request: NextRequest) {
 
     const conversationSid = request.nextUrl.searchParams.get('conversationSid');
 
+    // Get the base URL from the request for constructing media proxy URLs
+    const baseUrl = `${request.nextUrl.protocol}//${request.nextUrl.host}`;
+
     if (!conversationSid) {
       return NextResponse.json(
         { error: 'conversationSid is required' },
@@ -72,7 +75,7 @@ export async function GET(request: NextRequest) {
                 // Extract MessageSid and MediaSid from the Twilio URL
                 const twilioUrlMatch = mediaUrl.match(/Messages\/([^\/]+)\/Media\/([^\/\?]+)/);
                 const proxiedUrl = twilioUrlMatch
-                  ? `${process.env.NEXT_PUBLIC_API_URL || ''}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}`
+                  ? `${baseUrl}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}`
                   : mediaUrl;
 
                 media.push({
@@ -118,7 +121,7 @@ export async function GET(request: NextRequest) {
                 const twilioUrl = `https://api.twilio.com${m.uri.replace('.json', '')}`;
                 const twilioUrlMatch = twilioUrl.match(/Messages\/([^\/]+)\/Media\/([^\/\?]+)/);
                 const proxiedUrl = twilioUrlMatch
-                  ? `${process.env.NEXT_PUBLIC_API_URL || ''}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}`
+                  ? `${baseUrl}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}`
                   : twilioUrl;
 
                 return {
