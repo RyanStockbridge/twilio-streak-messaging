@@ -22,15 +22,13 @@ async function uploadMediaFile(
 ) {
   const region = process.env.TWILIO_REGION || 'us1';
   const uploadUrl = `https://mcs.${region}.twilio.com/v1/Services/${serviceSid}/Media`;
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
   const contentType = file.type || 'application/octet-stream';
   const filename = file.name || `attachment-${Date.now()}`;
 
   const formData = new FormData();
   formData.append('Filename', filename);
   formData.append('ContentType', contentType);
-  formData.append('Media', new Blob([buffer], { type: contentType }), filename);
+  formData.append('Filedata', file, filename);
 
   const response = await fetch(uploadUrl, {
     method: 'POST',
@@ -40,13 +38,19 @@ async function uploadMediaFile(
     body: formData
   });
 
+  const responseText = await response.text();
+
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to upload media to Twilio (${response.status}): ${errorText}`);
+    throw new Error(`Failed to upload media to Twilio (${response.status}): ${responseText}`);
   }
 
-  const data = await response.json();
-  return data.sid as string;
+  try {
+    const data = JSON.parse(responseText);
+    return data.sid as string;
+  } catch (error) {
+    console.error('Unexpected Twilio response while uploading media:', responseText);
+    throw new Error('Twilio returned an unexpected response while uploading media');
+  }
 }
 
 async function uploadMediaFiles(
