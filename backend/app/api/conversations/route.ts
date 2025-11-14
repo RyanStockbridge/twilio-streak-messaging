@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
 
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
+function getTwilioClient() {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
 
-if (!accountSid || !authToken) {
-  console.error('Missing Twilio credentials');
+  if (!accountSid || !authToken) {
+    throw new Error('Missing Twilio credentials in environment variables');
+  }
+
+  return twilio(accountSid, authToken);
 }
-
-const client = twilio(accountSid, authToken);
 
 export async function GET(request: NextRequest) {
   try {
@@ -25,13 +27,31 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(request.nextUrl.searchParams.get('limit') || '50');
     const pageSize = Math.min(limit, 100); // Cap at 100 per request
 
+    // Get Twilio client
+    const client = getTwilioClient();
+
     // Fetch conversations with pagination
     const conversations = await client.conversations.v1.conversations.list({
       limit: pageSize
     });
 
+    // Define the shape of our conversation response
+    type ConversationResponse = {
+      sid: string;
+      friendlyName: string | null;
+      dateCreated: Date;
+      dateUpdated: Date;
+      state: string;
+      participants: {
+        sid: string;
+        address: string | undefined;
+        type: string | undefined;
+      }[];
+    };
+
     // If phone numbers are provided, filter conversations
-    let filteredConversations = conversations;
+    let filteredConversations: ConversationResponse[];
+
     if (phoneNumbers) {
       const phoneNumberSet = new Set(phoneNumbers.split(',').map(p => p.trim()));
 
@@ -66,7 +86,7 @@ export async function GET(request: NextRequest) {
         })
       );
 
-      filteredConversations = conversationsWithParticipants.filter(c => c !== null) as any[];
+      filteredConversations = conversationsWithParticipants.filter((c) => c !== null) as ConversationResponse[];
     } else {
       // If no filter, return all conversations with participants
       filteredConversations = await Promise.all(

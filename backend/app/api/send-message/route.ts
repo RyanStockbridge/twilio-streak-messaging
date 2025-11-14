@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
 
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+function getTwilioClient() {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
 
-if (!accountSid || !authToken || !twilioPhoneNumber) {
-  console.error('Missing Twilio credentials');
+  if (!accountSid || !authToken) {
+    throw new Error('Missing Twilio credentials in environment variables');
+  }
+
+  return twilio(accountSid, authToken);
 }
-
-const client = twilio(accountSid, authToken);
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,6 +29,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Get Twilio client
+    const client = getTwilioClient();
 
     // Send message in the conversation
     const sentMessage = await client.conversations.v1

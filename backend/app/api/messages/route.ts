@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
 
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
+function getTwilioClient() {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
 
-if (!accountSid || !authToken) {
-  console.error('Missing Twilio credentials');
+  if (!accountSid || !authToken) {
+    throw new Error('Missing Twilio credentials in environment variables');
+  }
+
+  return twilio(accountSid, authToken);
 }
-
-const client = twilio(accountSid, authToken);
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,6 +28,9 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Get Twilio client
+    const client = getTwilioClient();
 
     // Fetch messages for the conversation
     const messages = await client.conversations.v1
