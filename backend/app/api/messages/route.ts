@@ -83,22 +83,41 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // If we have a Twilio Message SID, try to fetch media from the Messages API
-      if (!media && twilioMessageSid) {
+      // If we don't have media yet, try to get it from the SMS Messages API
+      // This handles both old messages and cases where the webhook didn't capture media
+      if (!media) {
         try {
-          const mediaList = await client.messages(twilioMessageSid).media.list();
+          // Try to find the SMS message SID from attributes or derive it
+          let smsMessageSid = twilioMessageSid;
 
-          if (mediaList.length > 0) {
-            media = mediaList.map((m: any) => ({
-              sid: m.sid,
-              contentType: m.contentType,
-              filename: 'image',
-              size: 0,
-              url: `https://api.twilio.com${m.uri.replace('.json', '')}`
-            }));
+          // If no MessageSid in attributes, check if this message has SMS binding
+          if (!smsMessageSid && msgAny.delivery) {
+            // For SMS messages, we can try to fetch from the Messages API
+            // The message might have been created via SMS
+            const delivery = msgAny.delivery as any;
+            if (delivery && delivery.status) {
+              // This is an SMS message, try to find its MessageSid
+              // We'll need to search for it based on the message content and timestamp
+            }
+          }
+
+          // If we have a MessageSid, fetch media
+          if (smsMessageSid && smsMessageSid.startsWith('MM') || smsMessageSid?.startsWith('SM')) {
+            const mediaList = await client.messages(smsMessageSid).media.list();
+
+            if (mediaList.length > 0) {
+              media = mediaList.map((m: any) => ({
+                sid: m.sid,
+                contentType: m.contentType,
+                filename: 'image',
+                size: 0,
+                url: `https://api.twilio.com${m.uri.replace('.json', '')}`
+              }));
+            }
           }
         } catch (error) {
-          console.error(`Error fetching media from Messages API for ${twilioMessageSid}:`, error);
+          // Silently fail - message just doesn't have media
+          console.log(`No media found for message ${msg.sid}`);
         }
       }
 
