@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Twilio Streak Messaging",
+  "version": "1.0.0",
+  "description": "Manage Twilio message threads integrated with Streak CRM",
+  "permissions": [
+    "storage",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://api.streak.com/*"
+  ],
+  "action": {
+    "default_title": "Open Twilio Messages"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

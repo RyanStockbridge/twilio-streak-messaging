@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Twilio Messages</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden">
+      <span id="toast-message"></span>
+    </div>
+
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen">
+      <div class="login-container">
+        <h1>Twilio Streak Messaging</h1>
+        <p>Enter your credentials to get started</p>
+
+        <div class="form-group">
+          <label for="streak-email">Streak Email</label>
+          <input type="email" id="streak-email" placeholder="your@email.com" required>
+        </div>
+
+        <div class="form-group">
+          <label for="streak-api-key">Streak API Key</label>
+          <input type="password" id="streak-api-key" placeholder="Enter your Streak API key" required>
+          <small>Get your API key from <a href="https://www.streak.com/api/" target="_blank">Streak API Settings</a></small>
+        </div>
+
+        <div class="form-group">
+          <label for="backend-url">Backend API URL</label>
+          <input type="text" id="backend-url" placeholder="https://your-backend.vercel.app" required>
+          <small>URL of your deployed Next.js backend</small>
+        </div>
+
+        <div class="form-group">
+          <label for="api-key">API Key (Optional)</label>
+          <input type="password" id="api-key" placeholder="Backend API key">
+          <small>If you set API_SECRET_KEY in your backend</small>
+        </div>
+
+        <button id="login-btn" class="btn btn-primary">Login</button>
+        <div id="login-error" class="error-message"></div>
+      </div>
+    </div>
+
+    <!-- Main Screen -->
+    <div id="main-screen" class="screen hidden">
+      <div class="header">
+        <h2>Messages</h2>
+        <div class="header-actions">
+          <label class="filter-toggle" title="Only show conversations with contacts in Streak boxes">
+            <input type="checkbox" id="filter-by-streak">
+            <span>Filter by Streak</span>
+          </label>
+          <button id="refresh-btn" class="btn btn-icon" title="Refresh">
+            <span>↻</span>
+          </button>
+          <button id="logout-btn" class="btn btn-icon" title="Logout">
+            <span>⚙</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="loading-indicator hidden" id="loading">
+        <div class="spinner"></div>
+        <p>Loading conversations...</p>
+      </div>
+
+      <!-- Conversation List -->
+      <div id="conversation-list" class="conversation-list">
+        <!-- Conversations will be populated here -->
+      </div>
+      <div id="load-more-container" class="load-more-container hidden">
+        <button id="load-more-btn" class="btn btn-secondary">Load More</button>
+      </div>
+
+      <!-- Message Thread -->
+      <div id="message-thread" class="message-thread hidden">
+        <div class="thread-header">
+          <button id="back-btn" class="btn btn-icon">←</button>
+          <div class="thread-info">
+            <h3 id="thread-name">Contact Name</h3>
+            <p id="thread-phone">+1 555-555-5555</p>
+          </div>
+          <button id="open-streak-btn" class="btn btn-small" title="Open in Streak">
+            Streak
+          </button>
+        </div>
+
+        <div id="messages-container" class="messages-container">
+          <!-- Messages will be populated here -->
+        </div>
+
+        <div class="message-input-container">
+          <textarea id="message-input" placeholder="Type a message..." rows="3"></textarea>
+          <button id="send-btn" class="btn btn-primary">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
