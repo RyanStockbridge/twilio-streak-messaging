@@ -108,17 +108,19 @@ export async function POST(request: NextRequest) {
       From: fromNumber,
       To: toNumber,
       Body: messageBody,
-      MessageSid: messageSid
+      MessageSid: messageSid,
+      NumMedia: numMedia
     } = body as any;
 
-    if (!fromNumber || !toNumber || !messageBody) {
+    if (!fromNumber || !toNumber) {
       return NextResponse.json(
-        { error: 'Missing required fields: From, To, Body' },
+        { error: 'Missing required fields: From, To' },
         { status: 400 }
       );
     }
 
     console.log(`Received SMS from ${fromNumber} to ${toNumber}: ${messageBody}`);
+    console.log(`NumMedia: ${numMedia}`);
 
     // Forward to Zapier (don't await - run in parallel)
     forwardToZapier(body).catch(err =>
@@ -129,10 +131,64 @@ export async function POST(request: NextRequest) {
     const client = getTwilioClient();
 
     // Find or create conversation for this phone number
-    // Once a conversation has SMS participants, Twilio automatically adds incoming SMS to it
     const conversation = await findOrCreateConversation(client, fromNumber, toNumber);
 
-    console.log(`Message will be automatically added to conversation ${conversation.sid}`);
+    // Twilio automatically adds the SMS to the conversation, but it doesn't include media attributes
+    // We need to wait a moment for the message to be added, then update its attributes with media info
+    if (numMedia && parseInt(numMedia) > 0) {
+      // Wait 2 seconds for Twilio to add the message to the conversation
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      try {
+        // Get the most recent message in the conversation
+        const recentMessages = await client.conversations.v1
+          .conversations(conversation.sid)
+          .messages.list({ limit: 5, order: 'desc' });
+
+        // Find the message that matches this MessageSid or was just added
+        const targetMessage = recentMessages.find((m: any) => {
+          // Check if it's from the same phone number and around the same time
+          return m.author === fromNumber && m.body === messageBody;
+        });
+
+        if (targetMessage) {
+          // Build media attributes object
+          const mediaAttrs: any = {
+            MessageSid: messageSid,
+            NumMedia: numMedia
+          };
+
+          // Add all MediaUrl and MediaContentType fields
+          for (let i = 0; i < parseInt(numMedia); i++) {
+            const mediaUrlKey = `MediaUrl${i}`;
+            const mediaContentTypeKey = `MediaContentType${i}`;
+
+            if (body[mediaUrlKey]) {
+              mediaAttrs[mediaUrlKey] = body[mediaUrlKey];
+            }
+            if (body[mediaContentTypeKey]) {
+              mediaAttrs[mediaContentTypeKey] = body[mediaContentTypeKey];
+            }
+          }
+
+          // Update the message attributes
+          await client.conversations.v1
+            .conversations(conversation.sid)
+            .messages(targetMessage.sid)
+            .update({
+              attributes: JSON.stringify(mediaAttrs)
+            });
+
+          console.log(`Updated message ${targetMessage.sid} with media attributes`);
+        } else {
+          console.log('Could not find matching message to update with media');
+        }
+      } catch (error) {
+        console.error('Error updating message with media attributes:', error);
+      }
+    }
+
+    console.log(`Message added to conversation ${conversation.sid}`);
 
     // Return TwiML response (required for Twilio webhooks)
     return new NextResponse(

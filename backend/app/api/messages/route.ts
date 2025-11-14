@@ -39,72 +39,66 @@ export async function GET(request: NextRequest) {
       .conversations(conversationSid)
       .messages.list({ limit: 100, order: 'desc' });
 
-    // Fetch media for each message that has attachments
+    // Get conversation participants to find the SMS message SIDs
+    const participants = await client.conversations.v1
+      .conversations(conversationSid)
+      .participants.list();
+
+    // Fetch media for each message that might have attachments
     const formattedMessages = await Promise.all(messages.map(async (msg) => {
       let media = null;
       const msgAny = msg as any;
 
-      // Check if message has media (NumMedia field or media property)
-      const hasMedia = msgAny.delivery?.total > 0 || msgAny.media ||
-                      (msgAny.attributes && JSON.parse(msgAny.attributes || '{}').NumMedia);
-
-      if (hasMedia) {
+      // Parse attributes to check for NumMedia or twilioMessageSid
+      let twilioMessageSid = null;
+      if (msgAny.attributes) {
         try {
-          // Fetch media using the REST API directly
-          const accountSid = process.env.TWILIO_ACCOUNT_SID;
-          const authToken = process.env.TWILIO_AUTH_TOKEN;
-          const authHeader = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+          const attrs = JSON.parse(msgAny.attributes);
 
-          const mediaResponse = await fetch(
-            `https://conversations.twilio.com/v1/Conversations/${conversationSid}/Messages/${msg.sid}`,
-            {
-              headers: {
-                'Authorization': `Basic ${authHeader}`
-              }
-            }
-          );
+          // Check if this message has media
+          if (attrs.NumMedia && parseInt(attrs.NumMedia) > 0) {
+            twilioMessageSid = attrs.MessageSid || attrs.twilioMessageSid;
 
-          if (mediaResponse.ok) {
-            const messageData = await mediaResponse.json();
+            // Extract media URLs from attributes (these come from the webhook)
+            const numMedia = parseInt(attrs.NumMedia);
+            media = [];
 
-            // Check if media links exist
-            if (messageData.links && messageData.links.delivery_receipts) {
-              // Try to fetch media from the message's media endpoint
-              const mediaListResponse = await fetch(
-                `https://conversations.twilio.com/v1/Conversations/${conversationSid}/Messages/${msg.sid}/Receipts`,
-                {
-                  headers: {
-                    'Authorization': `Basic ${authHeader}`
-                  }
-                }
-              );
-            }
+            for (let i = 0; i < numMedia; i++) {
+              const mediaUrl = attrs[`MediaUrl${i}`];
+              const mediaContentType = attrs[`MediaContentType${i}`];
 
-            // Parse attributes for MMS media URLs
-            if (messageData.attributes) {
-              const attrs = JSON.parse(messageData.attributes);
-              if (attrs.media && Array.isArray(attrs.media)) {
-                media = attrs.media.map((m: any) => ({
-                  sid: m.sid || '',
-                  contentType: m.content_type || m.contentType || 'image/jpeg',
-                  filename: m.filename || 'image',
-                  size: m.size || 0,
-                  url: m.url || ''
-                }));
-              } else if (attrs.MediaUrl0) {
-                // Legacy MMS format
-                media = [{
-                  sid: msg.sid,
-                  contentType: attrs.MediaContentType0 || 'image/jpeg',
-                  filename: 'image',
+              if (mediaUrl) {
+                media.push({
+                  sid: `media_${i}`,
+                  contentType: mediaContentType || 'image/jpeg',
+                  filename: `image_${i}`,
                   size: 0,
-                  url: attrs.MediaUrl0
-                }];
+                  url: mediaUrl
+                });
               }
             }
           }
         } catch (error) {
-          console.error(`Error fetching media for message ${msg.sid}:`, error);
+          console.error(`Error parsing attributes for message ${msg.sid}:`, error);
+        }
+      }
+
+      // If we have a Twilio Message SID, try to fetch media from the Messages API
+      if (!media && twilioMessageSid) {
+        try {
+          const mediaList = await client.messages(twilioMessageSid).media.list();
+
+          if (mediaList.length > 0) {
+            media = mediaList.map((m: any) => ({
+              sid: m.sid,
+              contentType: m.contentType,
+              filename: 'image',
+              size: 0,
+              url: `https://api.twilio.com${m.uri.replace('.json', '')}`
+            }));
+          }
+        } catch (error) {
+          console.error(`Error fetching media from Messages API for ${twilioMessageSid}:`, error);
         }
       }
 
