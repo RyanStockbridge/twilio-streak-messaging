@@ -78,12 +78,18 @@ twilio-streak-messaging/
    vercel env add TWILIO_AUTH_TOKEN
    vercel env add TWILIO_PHONE_NUMBER
    vercel env add API_SECRET_KEY
+   vercel env add ZAPIER_WEBHOOK_URL  # Optional: for forwarding to Zapier
    ```
 
    Or via the Vercel dashboard:
    - Go to your project settings
    - Navigate to "Environment Variables"
    - Add each variable for Production, Preview, and Development
+
+   **Optional Zapier Integration:**
+   - If you have an existing Zapier webhook that should continue to receive SMS data, add:
+   - `ZAPIER_WEBHOOK_URL=https://hooks.zapier.com/hooks/catch/YOUR_HOOK_ID`
+   - The webhook will forward all incoming SMS to Zapier while also creating conversations
 
 7. **Redeploy to apply environment variables:**
    ```bash
@@ -160,6 +166,7 @@ Fetches all Twilio conversations with optional phone number filtering.
 
 **Query Parameters:**
 - `phoneNumbers` (optional): Comma-separated phone numbers
+- `limit` (optional): Number of conversations to fetch (default: 50, max: 100)
 
 **Response:**
 ```json
@@ -195,17 +202,89 @@ Sends a message in a conversation.
 }
 ```
 
+### POST /api/webhook/sms
+**NEW:** Webhook endpoint for incoming SMS that automatically creates conversations.
+
+This endpoint handles incoming SMS from Twilio and ensures messages are added to conversations automatically.
+
+**Incoming SMS (Twilio Webhook):**
+- Set this as your Twilio phone number's webhook URL
+- Twilio will POST form data when SMS arrives
+- Automatically finds or creates a conversation for the sender
+- Adds the message to the conversation
+
+**Setup in Twilio:**
+1. Go to your Twilio Console → Phone Numbers → Manage → Active Numbers
+2. Click on your phone number
+3. Scroll to "Messaging Configuration"
+4. Set "A MESSAGE COMES IN" webhook to: `https://your-backend.vercel.app/api/webhook/sms`
+5. Method: POST
+6. Save
+
+### PUT /api/webhook/sms
+Send outbound SMS via automation (e.g., ActiveCampaign).
+
+**Body:**
+```json
+{
+  "to": "+1234567890",
+  "from": "+1987654321",
+  "message": "Your message text",
+  "author": "automation@example.com"
+}
+```
+
+**Headers:**
+- `x-api-key`: Your API_SECRET_KEY (for security)
+
+**Response:**
+```json
+{
+  "success": true,
+  "conversationSid": "CHxxxx",
+  "message": { ... }
+}
+```
+
+**ActiveCampaign Setup:**
+1. In your automation, add a "Webhook" action
+2. URL: `https://your-backend.vercel.app/api/webhook/sms`
+3. Method: PUT
+4. Headers: Add `x-api-key` with your API_SECRET_KEY
+5. Body (JSON):
+```json
+{
+  "to": "%PHONE%",
+  "from": "YOUR_TWILIO_NUMBER",
+  "message": "Your automated message",
+  "author": "ActiveCampaign"
+}
+```
+
 ## Twilio Setup Requirements
 
 Your Twilio account needs to be configured with:
 
 1. **Conversations API** enabled
 2. **A phone number** configured for messaging
-3. **Conversations** created for each contact you want to message
+3. **(Optional) Messaging Service** - recommended for better conversation management
 
-To create conversations programmatically, you can use the Twilio Console or API. Each conversation should have:
-- A participant for your Twilio number
-- A participant for the customer's phone number
+### Auto-Creating Conversations
+
+With the new webhook endpoint, conversations are **automatically created** when:
+- Someone sends an SMS to your Twilio number (incoming)
+- Your ActiveCampaign automation sends an SMS (outgoing)
+
+**Setup Steps:**
+1. Deploy the backend with the webhook endpoint
+2. Configure your Twilio phone number to use the webhook (see [POST /api/webhook/sms](#post-apiwebhooksms))
+3. Messages will now automatically be organized into conversations by phone number
+
+**How it works:**
+- First message to/from a phone number creates a new conversation
+- Subsequent messages are added to the existing conversation
+- Each conversation has participants for both your Twilio number and the customer's number
+- Conversation friendly name: "SMS with +1234567890"
 
 ## Security Considerations
 

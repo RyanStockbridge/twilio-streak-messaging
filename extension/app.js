@@ -104,7 +104,8 @@ function showToast(message, type = 'info', duration = 3000) {
 // Streak API functions
 async function verifyStreakAccess() {
   try {
-    const response = await fetch('https://api.streak.com/api/v2/users/me/teams', {
+    // Simply verify the API key works by fetching user info (v1 API)
+    const response = await fetch('https://api.streak.com/api/v1/users/me', {
       headers: {
         'Authorization': `Basic ${btoa(state.streakApiKey + ':')}`
       }
@@ -113,26 +114,15 @@ async function verifyStreakAccess() {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Streak API error:', errorText);
-      throw new Error(`Failed to fetch teams: ${response.status}`);
+      throw new Error(`Failed to verify Streak access: ${response.status}`);
     }
 
-    const teams = await response.json();
-    console.log('Streak teams response:', teams);
+    const user = await response.json();
+    console.log('Streak user response:', user);
 
-    // Handle both array and object responses
-    const teamsArray = Array.isArray(teams) ? teams : (teams.results || []);
-    state.userTeams = teamsArray;
-
-    // Check if user has access (is Owner or Member)
-    const hasAccess = teamsArray.some(team => {
-      const members = team.members || [];
-      return members.some(member =>
-        member.email === state.streakEmail &&
-        (member.role === 'OWNER' || member.role === 'MEMBER')
-      );
-    });
-
-    return hasAccess;
+    // If we got a valid user response, we have access
+    // Note: v1 API may return email in a different field
+    return user && (user.email === state.streakEmail || user.emailAddress === state.streakEmail);
   } catch (error) {
     console.error('Error verifying Streak access:', error);
     return false;
