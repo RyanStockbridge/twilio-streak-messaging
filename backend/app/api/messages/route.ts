@@ -68,12 +68,19 @@ export async function GET(request: NextRequest) {
               const mediaContentType = attrs[`MediaContentType${i}`];
 
               if (mediaUrl) {
+                // Convert Twilio media URL to our proxied URL
+                // Extract MessageSid and MediaSid from the Twilio URL
+                const twilioUrlMatch = mediaUrl.match(/Messages\/([^\/]+)\/Media\/([^\/\?]+)/);
+                const proxiedUrl = twilioUrlMatch
+                  ? `${process.env.NEXT_PUBLIC_API_URL || ''}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}`
+                  : mediaUrl;
+
                 media.push({
                   sid: `media_${i}`,
                   contentType: mediaContentType || 'image/jpeg',
                   filename: `image_${i}`,
                   size: 0,
-                  url: mediaUrl
+                  url: proxiedUrl
                 });
               }
             }
@@ -106,13 +113,22 @@ export async function GET(request: NextRequest) {
             const mediaList = await client.messages(smsMessageSid).media.list();
 
             if (mediaList.length > 0) {
-              media = mediaList.map((m: any) => ({
-                sid: m.sid,
-                contentType: m.contentType,
-                filename: 'image',
-                size: 0,
-                url: `https://api.twilio.com${m.uri.replace('.json', '')}`
-              }));
+              media = mediaList.map((m: any) => {
+                // Convert Twilio media URL to our proxied URL
+                const twilioUrl = `https://api.twilio.com${m.uri.replace('.json', '')}`;
+                const twilioUrlMatch = twilioUrl.match(/Messages\/([^\/]+)\/Media\/([^\/\?]+)/);
+                const proxiedUrl = twilioUrlMatch
+                  ? `${process.env.NEXT_PUBLIC_API_URL || ''}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}`
+                  : twilioUrl;
+
+                return {
+                  sid: m.sid,
+                  contentType: m.contentType,
+                  filename: 'image',
+                  size: 0,
+                  url: proxiedUrl
+                };
+              });
             }
           }
         } catch (error) {

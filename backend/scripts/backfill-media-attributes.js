@@ -60,9 +60,10 @@ async function backfillMediaAttributes() {
               const phoneNumber = msg.author;
               const messageTime = new Date(msg.dateCreated);
 
-              // Search for SMS messages from this number around this time (within 1 minute)
-              const dateSentAfter = new Date(messageTime.getTime() - 60000);
-              const dateSentBefore = new Date(messageTime.getTime() + 60000);
+              // Search for SMS messages from this number around this time (within 10 seconds)
+              // Using a tighter window since Autocreate is very fast
+              const dateSentAfter = new Date(messageTime.getTime() - 10000);
+              const dateSentBefore = new Date(messageTime.getTime() + 10000);
 
               const smsMessages = await client.messages.list({
                 from: phoneNumber,
@@ -71,8 +72,23 @@ async function backfillMediaAttributes() {
                 limit: 10
               });
 
-              // Find matching message by body content
-              const matchingSms = smsMessages.find(sms => sms.body === msg.body);
+              // Find matching message by body content OR by closest timestamp if body is empty
+              let matchingSms = null;
+
+              if (msg.body) {
+                // Match by body if present
+                matchingSms = smsMessages.find(sms => sms.body === msg.body);
+              } else {
+                // For MMS-only messages (no body), match by closest timestamp
+                // This handles the case where MMS messages show up as "(no body)" in conversations
+                matchingSms = smsMessages
+                  .filter(sms => sms.numMedia && parseInt(sms.numMedia) > 0)
+                  .sort((a, b) => {
+                    const diffA = Math.abs(new Date(a.dateSent).getTime() - messageTime.getTime());
+                    const diffB = Math.abs(new Date(b.dateSent).getTime() - messageTime.getTime());
+                    return diffA - diffB;
+                  })[0];
+              }
 
               if (matchingSms && matchingSms.numMedia && parseInt(matchingSms.numMedia) > 0) {
                 console.log(`  Found matching SMS ${matchingSms.sid} with ${matchingSms.numMedia} media`);
