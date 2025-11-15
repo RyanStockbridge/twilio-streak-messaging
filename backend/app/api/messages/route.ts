@@ -27,6 +27,21 @@ export async function GET(request: NextRequest) {
     // Get the base URL from the request for constructing media proxy URLs
     const baseUrl = `${request.nextUrl.protocol}//${request.nextUrl.host}`;
 
+    const ensureAbsoluteUrl = (url: string) => {
+      if (!url) return '';
+      try {
+        return new URL(url, baseUrl).toString();
+      } catch (error) {
+        return url;
+      }
+    };
+
+    const extractServiceSidFromLink = (link?: string | null) => {
+      if (!link) return null;
+      const match = link.match(/Services\/([^\/]+)\/Media/);
+      return match ? match[1] : null;
+    };
+
     if (!conversationSid) {
       return NextResponse.json(
         { error: 'conversationSid is required' },
@@ -36,6 +51,10 @@ export async function GET(request: NextRequest) {
 
     // Get Twilio client
     const client = getTwilioClient();
+    const conversationDetails = await client.conversations.v1
+      .conversations(conversationSid)
+      .fetch();
+    const serviceSid = (conversationDetails as any)?.chatServiceSid || (conversationDetails as any)?.chat_service_sid || null;
 
     // Fetch messages for the conversation
     const messages = await client.conversations.v1
@@ -96,16 +115,24 @@ export async function GET(request: NextRequest) {
       // If media info isn't set yet, check the Conversations media array
       if (!media && Array.isArray((msgAny as any).media) && (msgAny as any).media.length > 0) {
         media = (msgAny as any).media.map((m: any, idx: number) => {
-          const possibleUrls = [
+          const linkOptions = [
             m.links?.content_direct,
             m.links?.content,
             m.url
           ].filter(Boolean);
 
-          let proxiedUrl = possibleUrls[0] || '';
-          const twilioUrlMatch = proxiedUrl.match(/Messages\/([^\/]+)\/Media\/([^\/\?]+)/);
-          if (twilioUrlMatch) {
-            proxiedUrl = `${baseUrl}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}`;
+          const serviceFromLink = linkOptions
+            .map(link => extractServiceSidFromLink(link))
+            .find(Boolean);
+
+          const effectiveServiceSid = serviceSid || serviceFromLink;
+
+          let proxiedUrl = '';
+
+          if (effectiveServiceSid && m.sid) {
+            proxiedUrl = `${baseUrl}/api/conversation-media/${effectiveServiceSid}/${m.sid}`;
+          } else if (linkOptions.length > 0) {
+            proxiedUrl = ensureAbsoluteUrl(linkOptions[0]);
           }
 
           return {
