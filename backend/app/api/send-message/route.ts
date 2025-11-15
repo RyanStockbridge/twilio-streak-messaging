@@ -14,6 +14,52 @@ function getTwilioClient() {
   return twilio(accountSid, authToken);
 }
 
+const EXTENSION_MIME_MAP: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  svg: 'image/svg+xml',
+  pdf: 'application/pdf',
+  txt: 'text/plain',
+  csv: 'text/csv',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime'
+};
+
+function resolveContentType(file: File) {
+  if (file.type && file.type.trim()) {
+    return file.type;
+  }
+
+  const fileName = file.name || '';
+  const extension = fileName.split('.').pop()?.toLowerCase() || '';
+  if (extension && EXTENSION_MIME_MAP[extension]) {
+    return EXTENSION_MIME_MAP[extension];
+  }
+
+  return 'application/octet-stream';
+}
+
+async function getBlobWithType(file: File, mimeType: string) {
+  if (file.type === mimeType) {
+    return file;
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  return new Blob([arrayBuffer], { type: mimeType });
+}
+
 async function uploadMediaFile(
   serviceSid: string,
   file: File,
@@ -22,13 +68,14 @@ async function uploadMediaFile(
 ) {
   const region = process.env.TWILIO_REGION || 'us1';
   const uploadUrl = `https://mcs.${region}.twilio.com/v1/Services/${serviceSid}/Media`;
-  const contentType = file.type || 'application/octet-stream';
   const filename = file.name || `attachment-${Date.now()}`;
+  const contentType = resolveContentType(file);
+  const fileData = await getBlobWithType(file, contentType);
 
   const formData = new FormData();
   formData.append('Filename', filename);
   formData.append('ContentType', contentType);
-  formData.append('Filedata', file, filename);
+  formData.append('Filedata', fileData, filename);
 
   const response = await fetch(uploadUrl, {
     method: 'POST',
