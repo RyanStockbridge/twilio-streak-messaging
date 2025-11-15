@@ -51,15 +51,6 @@ function resolveContentType(file: File) {
   return 'application/octet-stream';
 }
 
-async function getBlobWithType(file: File, mimeType: string) {
-  if (file.type === mimeType) {
-    return file;
-  }
-
-  const arrayBuffer = await file.arrayBuffer();
-  return new Blob([arrayBuffer], { type: mimeType });
-}
-
 async function uploadMediaFile(
   serviceSid: string,
   file: File,
@@ -70,19 +61,18 @@ async function uploadMediaFile(
   const uploadUrl = `https://mcs.${region}.twilio.com/v1/Services/${serviceSid}/Media`;
   const filename = file.name || `attachment-${Date.now()}`;
   const contentType = resolveContentType(file);
-  const fileData = await getBlobWithType(file, contentType);
-
-  const formData = new FormData();
-  formData.append('Filename', filename);
-  formData.append('ContentType', contentType);
-  formData.append('Media', fileData, filename);
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
 
   const response = await fetch(uploadUrl, {
     method: 'POST',
     headers: {
-      Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64')
+      Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
+      'Content-Type': contentType,
+      'Content-Length': buffer.byteLength.toString(),
+      'Content-Disposition': `inline; filename="${filename}"`
     },
-    body: formData
+    body: buffer
   });
 
   const responseText = await response.text();
