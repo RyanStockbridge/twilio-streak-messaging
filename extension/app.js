@@ -52,7 +52,8 @@ async function init() {
     'streakApiKey',
     'backendUrl',
     'apiKey',
-    'contactCache'
+    'contactCache',
+    'pendingConversationOpen'
   ]);
 
   if (saved.streakEmail && saved.streakApiKey && saved.backendUrl) {
@@ -67,6 +68,19 @@ async function init() {
     if (hasAccess) {
       showMainScreen();
       await loadConversations();
+
+      // Check if we need to open a specific conversation (from notification click)
+      if (saved.pendingConversationOpen) {
+        const conversationSid = saved.pendingConversationOpen;
+        // Clear the pending open
+        await chrome.storage.local.remove('pendingConversationOpen');
+
+        // Find and open the conversation
+        const conversation = state.conversations.find(c => c.sid === conversationSid);
+        if (conversation) {
+          selectConversation(conversation);
+        }
+      }
     } else {
       showLoginScreen();
       showError('Unable to verify Streak access. Please login again.');
@@ -394,7 +408,7 @@ function showLoading(show) {
   }
 }
 
-function renderConversationList() {
+async function renderConversationList() {
   conversationList.innerHTML = '';
 
   if (state.conversations.length === 0) {
@@ -408,12 +422,26 @@ function renderConversationList() {
     return;
   }
 
+  // Get last known conversations to check for unread
+  const saved = await chrome.storage.local.get(['lastKnownConversations']);
+  const lastKnown = saved.lastKnownConversations || {};
+
   state.conversations.forEach(conv => {
     const phoneNumber = conv.participants.find(p => p.type === 'sms')?.address || 'Unknown';
     const item = document.createElement('div');
     item.className = 'conversation-item';
+
+    // Check if conversation has unread messages
+    const lastKnownConv = lastKnown[conv.sid];
+    const isUnread = lastKnownConv && lastKnownConv.lastReadTime &&
+                     new Date(conv.dateUpdated) > new Date(lastKnownConv.lastReadTime);
+
+    if (isUnread) {
+      item.classList.add('unread');
+    }
+
     item.innerHTML = `
-      <div class="conversation-name">${conv.contactName || 'Unknown Contact'}</div>
+      <div class="conversation-name">${conv.contactName || 'Unknown Contact'}${isUnread ? ' <span class="unread-indicator">●</span>' : ''}</div>
       <div class="conversation-phone">${phoneNumber}</div>
       <div class="conversation-time">${formatDate(conv.dateUpdated)}</div>
     `;
@@ -452,6 +480,12 @@ function selectConversation(conversation) {
   conversationList.classList.add('hidden');
   loadMoreContainer.classList.add('hidden');
   messageThread.classList.remove('hidden');
+
+  // Notify background script that conversation was opened (mark as read)
+  chrome.runtime.sendMessage({
+    type: 'MARK_CONVERSATION_READ',
+    conversationSid: conversation.sid
+  });
 
   loadMessages(conversation.sid);
   startAutoRefresh();

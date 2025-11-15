@@ -5,7 +5,9 @@
   "description": "Manage Twilio message threads integrated with Streak CRM",
   "permissions": [
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "notifications",
+    "alarms"
   ],
   "host_permissions": [
     "https://api.streak.com/*"

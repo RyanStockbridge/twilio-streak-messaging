@@ -43,6 +43,7 @@ export async function GET(request: NextRequest) {
       friendlyName: string | null;
       dateCreated: Date;
       dateUpdated: Date;
+      latestMessageDate: Date | null;
       state: string;
       participants: {
         sid: string;
@@ -71,11 +72,19 @@ export async function GET(request: NextRequest) {
           });
 
           if (hasMatchingNumber) {
+            // Fetch the latest message to get accurate timestamp
+            const messages = await client.conversations.v1
+              .conversations(conv.sid)
+              .messages.list({ limit: 1, order: 'desc' });
+
+            const latestMessageDate = messages.length > 0 ? messages[0].dateCreated : null;
+
             return {
               sid: conv.sid,
               friendlyName: conv.friendlyName,
               dateCreated: conv.dateCreated,
               dateUpdated: conv.dateUpdated,
+              latestMessageDate: latestMessageDate,
               state: conv.state,
               participants: participants.map(p => ({
                 sid: p.sid,
@@ -97,11 +106,19 @@ export async function GET(request: NextRequest) {
             .conversations(conv.sid)
             .participants.list();
 
+          // Fetch the latest message to get accurate timestamp
+          const messages = await client.conversations.v1
+            .conversations(conv.sid)
+            .messages.list({ limit: 1, order: 'desc' });
+
+          const latestMessageDate = messages.length > 0 ? messages[0].dateCreated : null;
+
           return {
             sid: conv.sid,
             friendlyName: conv.friendlyName,
             dateCreated: conv.dateCreated,
             dateUpdated: conv.dateUpdated,
+            latestMessageDate: latestMessageDate,
             state: conv.state,
             participants: participants.map(p => ({
               sid: p.sid,
