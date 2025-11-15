@@ -27,6 +27,9 @@ export async function GET(request: NextRequest) {
     // Get the base URL from the request for constructing media proxy URLs
     const baseUrl = `${request.nextUrl.protocol}//${request.nextUrl.host}`;
 
+    // Prepare API key query param for media URLs
+    const apiKeyParam = apiKey ? `?apiKey=${encodeURIComponent(apiKey)}` : '';
+
     const ensureAbsoluteUrl = (url: string) => {
       if (!url) return '';
       try {
@@ -94,7 +97,7 @@ export async function GET(request: NextRequest) {
                 // Extract MessageSid and MediaSid from the Twilio URL
                 const twilioUrlMatch = mediaUrl.match(/Messages\/([^\/]+)\/Media\/([^\/\?]+)/);
                 const proxiedUrl = twilioUrlMatch
-                  ? `${baseUrl}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}`
+                  ? `${baseUrl}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}${apiKeyParam}`
                   : mediaUrl;
 
                 media.push({
@@ -130,7 +133,7 @@ export async function GET(request: NextRequest) {
           let proxiedUrl = '';
 
           if (effectiveServiceSid && m.sid) {
-            proxiedUrl = `${baseUrl}/api/conversation-media/${effectiveServiceSid}/${m.sid}`;
+            proxiedUrl = `${baseUrl}/api/conversation-media/${effectiveServiceSid}/${m.sid}${apiKeyParam}`;
           } else if (linkOptions.length > 0) {
             proxiedUrl = ensureAbsoluteUrl(linkOptions[0]);
           }
@@ -173,7 +176,7 @@ export async function GET(request: NextRequest) {
                 const twilioUrl = `https://api.twilio.com${m.uri.replace('.json', '')}`;
                 const twilioUrlMatch = twilioUrl.match(/Messages\/([^\/]+)\/Media\/([^\/\?]+)/);
                 const proxiedUrl = twilioUrlMatch
-                  ? `${baseUrl}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}`
+                  ? `${baseUrl}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}${apiKeyParam}`
                   : twilioUrl;
 
                 return {
