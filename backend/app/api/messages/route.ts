@@ -93,6 +93,31 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      // If media info isn't set yet, check the Conversations media array
+      if (!media && Array.isArray((msgAny as any).media) && (msgAny as any).media.length > 0) {
+        media = (msgAny as any).media.map((m: any, idx: number) => {
+          const possibleUrls = [
+            m.links?.content_direct,
+            m.links?.content,
+            m.url
+          ].filter(Boolean);
+
+          let proxiedUrl = possibleUrls[0] || '';
+          const twilioUrlMatch = proxiedUrl.match(/Messages\/([^\/]+)\/Media\/([^\/\?]+)/);
+          if (twilioUrlMatch) {
+            proxiedUrl = `${baseUrl}/api/media/${twilioUrlMatch[1]}/${twilioUrlMatch[2]}`;
+          }
+
+          return {
+            sid: m.sid || `media_${idx}`,
+            contentType: m.content_type || m.contentType || 'image/jpeg',
+            filename: m.filename || m.fileName || `image_${idx}`,
+            size: m.size || 0,
+            url: proxiedUrl
+          };
+        });
+      }
+
       // If we don't have media yet, try to get it from the SMS Messages API
       // This handles both old messages and cases where the webhook didn't capture media
       if (!media) {
