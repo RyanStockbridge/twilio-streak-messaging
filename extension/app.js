@@ -1,6 +1,8 @@
 // Application state
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
+const AUTO_REFRESH_INTERVAL_MS = 15000;
+
 const state = {
   streakEmail: null,
   streakApiKey: null,
@@ -300,12 +302,12 @@ function startAutoRefresh() {
   stopAutoRefresh();
 
   if (state.autoRefreshEnabled && state.currentConversation) {
-    // Refresh messages every 5 seconds
+    // Refresh messages on interval
     state.autoRefreshInterval = setInterval(() => {
       if (state.currentConversation) {
         loadMessages(state.currentConversation.sid, true);
       }
-    }, 5000);
+    }, AUTO_REFRESH_INTERVAL_MS);
   }
 }
 
@@ -313,6 +315,14 @@ function stopAutoRefresh() {
   if (state.autoRefreshInterval) {
     clearInterval(state.autoRefreshInterval);
     state.autoRefreshInterval = null;
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    stopAutoRefresh();
+  } else if (state.currentConversation) {
+    startAutoRefresh();
   }
 }
 
@@ -459,6 +469,9 @@ function renderMessages() {
     return;
   }
 
+  let imageIndex = 0;
+  const imagesToLoad = [];
+
   state.messages.forEach(msg => {
     const isOutgoing = msg.author === state.streakEmail || msg.author === 'system';
     const messageEl = document.createElement('div');
@@ -470,17 +483,11 @@ function renderMessages() {
     if (msg.media && msg.media.length > 0) {
       msg.media.forEach(mediaItem => {
         if (mediaItem.contentType && mediaItem.contentType.startsWith('image/')) {
-          // Check if it's HEIC format (not supported by browsers)
-          const isHeic = mediaItem.contentType.includes('heic') ||
-                        mediaItem.contentType.includes('heif') ||
-                        (mediaItem.filename && mediaItem.filename.toLowerCase().endsWith('.heic'));
-
-          if (isHeic) {
-            messageContent += `<div class="message-media-unsupported">📷 Image (HEIC format - <a href="${mediaItem.url}" target="_blank">Download to view</a>)</div>`;
-          } else {
-            messageContent += `<img src="${mediaItem.url}" alt="${mediaItem.filename || 'Image'}" class="message-image" />`;
-            messageContent += `<div class="message-media-error" style="display:none;">📷 Image unavailable - <a href="${mediaItem.url}" target="_blank">Try opening directly</a></div>`;
-          }
+          // Create a placeholder for the image that will be loaded progressively
+          const imgId = `lazy-img-${imageIndex++}`;
+          messageContent += `<img id="${imgId}" class="message-image" alt="${mediaItem.filename || 'Image'}" style="display:none;" />`;
+          messageContent += `<div id="${imgId}-placeholder" class="message-media-other">📷 Loading image...</div>`;
+          imagesToLoad.push({ imgId, url: mediaItem.url, filename: mediaItem.filename });
         } else if (mediaItem.contentType) {
           // Show other media types as download links
           messageContent += `<div class="message-media-other">📎 <a href="${mediaItem.url}" target="_blank">${mediaItem.filename || 'Media file'}</a> (${mediaItem.contentType})</div>`;
@@ -515,6 +522,25 @@ function renderMessages() {
 
     messageEl.innerHTML = messageContent;
     messagesContainer.appendChild(messageEl);
+  });
+
+  // Load images progressively with delay to avoid overwhelming Chrome
+  imagesToLoad.forEach((imageInfo, index) => {
+    setTimeout(() => {
+      const imgElement = document.getElementById(imageInfo.imgId);
+      const placeholderElement = document.getElementById(`${imageInfo.imgId}-placeholder`);
+
+      if (imgElement && placeholderElement) {
+        imgElement.onload = () => {
+          imgElement.style.display = 'block';
+          placeholderElement.style.display = 'none';
+        };
+        imgElement.onerror = () => {
+          placeholderElement.innerHTML = `📷 <a href="${imageInfo.url}" target="_blank">${imageInfo.filename || 'Image'}</a> (failed to load)`;
+        };
+        imgElement.src = imageInfo.url;
+      }
+    }, index * 100); // Load each image 100ms apart
   });
 
   // Scroll to bottom
@@ -742,3 +768,6 @@ messageInput.addEventListener('keydown', (e) => {
 
 // Initialize the app
 init();
+
+document.addEventListener('visibilitychange', handleVisibilityChange);
+window.addEventListener('beforeunload', stopAutoRefresh);
