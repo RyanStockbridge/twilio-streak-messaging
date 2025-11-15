@@ -468,27 +468,22 @@ function renderMessages() {
 
     // Add media (images) if present
     if (msg.media && msg.media.length > 0) {
-      msg.media.forEach((mediaItem, mediaIndex) => {
+      msg.media.forEach(mediaItem => {
         if (mediaItem.contentType && mediaItem.contentType.startsWith('image/')) {
           // Check if it's HEIC format (not supported by browsers)
           const isHeic = mediaItem.contentType.includes('heic') ||
                         mediaItem.contentType.includes('heif') ||
                         (mediaItem.filename && mediaItem.filename.toLowerCase().endsWith('.heic'));
-          const mediaUrl = buildMediaUrl(mediaItem.url);
 
           if (isHeic) {
-            messageContent += `<div class="message-media-unsupported">📷 Image (HEIC format - <a href="${mediaUrl}" target="_blank">Download to view</a>)</div>`;
+            messageContent += `<div class="message-media-unsupported">📷 Image (HEIC format - <a href="${mediaItem.url}" target="_blank">Download to view</a>)</div>`;
           } else {
-            // Create unique IDs for this image and error message
-            const imageId = `img-${msg.sid}-${mediaIndex}`;
-            const errorId = `error-${msg.sid}-${mediaIndex}`;
-            messageContent += `<img id="${imageId}" src="${mediaUrl}" alt="${mediaItem.filename || 'Image'}" class="message-image" data-error-id="${errorId}" />`;
-            messageContent += `<div id="${errorId}" class="message-media-error" style="display:none;">📷 Image unavailable - <a href="${mediaUrl}" target="_blank">Try opening directly</a></div>`;
+            messageContent += `<img src="${mediaItem.url}" alt="${mediaItem.filename || 'Image'}" class="message-image" />`;
+            messageContent += `<div class="message-media-error" style="display:none;">📷 Image unavailable - <a href="${mediaItem.url}" target="_blank">Try opening directly</a></div>`;
           }
         } else if (mediaItem.contentType) {
           // Show other media types as download links
-          const mediaUrl = buildMediaUrl(mediaItem.url);
-          messageContent += `<div class="message-media-other">📎 <a href="${mediaUrl}" target="_blank">${mediaItem.filename || 'Media file'}</a> (${mediaItem.contentType})</div>`;
+          messageContent += `<div class="message-media-other">📎 <a href="${mediaItem.url}" target="_blank">${mediaItem.filename || 'Media file'}</a> (${mediaItem.contentType})</div>`;
         }
       });
     }
@@ -520,31 +515,6 @@ function renderMessages() {
 
     messageEl.innerHTML = messageContent;
     messagesContainer.appendChild(messageEl);
-
-    // Add error handlers to images (must be done after appending to DOM)
-    if (msg.media && msg.media.length > 0) {
-      msg.media.forEach((mediaItem, mediaIndex) => {
-        if (mediaItem.contentType && mediaItem.contentType.startsWith('image/')) {
-          const isHeic = mediaItem.contentType.includes('heic') ||
-                        mediaItem.contentType.includes('heif') ||
-                        (mediaItem.filename && mediaItem.filename.toLowerCase().endsWith('.heic'));
-
-          if (!isHeic) {
-            const imageId = `img-${msg.sid}-${mediaIndex}`;
-            const errorId = `error-${msg.sid}-${mediaIndex}`;
-            const imgElement = document.getElementById(imageId);
-            const errorElement = document.getElementById(errorId);
-
-            if (imgElement && errorElement) {
-              imgElement.addEventListener('error', () => {
-                imgElement.style.display = 'none';
-                errorElement.style.display = 'block';
-              });
-            }
-          }
-        }
-      });
-    }
   });
 
   // Scroll to bottom
