@@ -75,7 +75,7 @@ async function uploadMediaFile(
   const formData = new FormData();
   formData.append('Filename', filename);
   formData.append('ContentType', contentType);
-  formData.append('Filedata', fileData, filename);
+  formData.append('Media', fileData, filename);
 
   const response = await fetch(uploadUrl, {
     method: 'POST',
