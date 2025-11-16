@@ -16,7 +16,12 @@ export async function GET(request: NextRequest) {
     const since = request.nextUrl.searchParams.get('since');
     const events = getNotificationsSince(since);
 
-    return NextResponse.json({ events });
+    return NextResponse.json({ events }, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'x-api-key, content-type'
+      }
+    });
   } catch (error: any) {
     console.error('Error fetching notifications:', error);
     return NextResponse.json(
