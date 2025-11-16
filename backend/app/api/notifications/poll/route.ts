@@ -45,10 +45,7 @@ export async function GET(request: NextRequest) {
 
     const client = getTwilioClient();
 
-    const conversations = await client.conversations.v1.conversations.list({
-      limit: 50,
-      order: 'desc'
-    });
+    const conversations = await client.conversations.v1.conversations.list();
 
     const events: any[] = [];
 
