@@ -3,6 +3,8 @@ const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 const AUTO_REFRESH_INTERVAL_MS = 15000;
 
+let imageObserver = null;
+
 const state = {
   streakEmail: null,
   streakApiKey: null,
@@ -394,7 +396,7 @@ function showLoading(show) {
   }
 }
 
-function renderConversationList() {
+async function renderConversationList() {
   conversationList.innerHTML = '';
 
   if (state.conversations.length === 0) {
@@ -408,12 +410,24 @@ function renderConversationList() {
     return;
   }
 
+  // Get unread conversations list
+  const saved = await chrome.storage.local.get(['unreadConversations']);
+  const unreadConversations = new Set(saved.unreadConversations || []);
+
   state.conversations.forEach(conv => {
     const phoneNumber = conv.participants.find(p => p.type === 'sms')?.address || 'Unknown';
     const item = document.createElement('div');
     item.className = 'conversation-item';
+
+    // Check if conversation is in the unread list
+    const isUnread = unreadConversations.has(conv.sid);
+
+    if (isUnread) {
+      item.classList.add('unread');
+    }
+
     item.innerHTML = `
-      <div class="conversation-name">${conv.contactName || 'Unknown Contact'}</div>
+      <div class="conversation-name">${conv.contactName || 'Unknown Contact'}${isUnread ? ' <span class="unread-indicator">●</span>' : ''}</div>
       <div class="conversation-phone">${phoneNumber}</div>
       <div class="conversation-time">${formatDate(conv.dateUpdated)}</div>
     `;
@@ -453,11 +467,67 @@ function selectConversation(conversation) {
   loadMoreContainer.classList.add('hidden');
   messageThread.classList.remove('hidden');
 
+  // Notify background script that conversation was opened (mark as read)
+  chrome.runtime.sendMessage({
+    type: 'MARK_CONVERSATION_READ',
+    conversationSid: conversation.sid
+  });
+
   loadMessages(conversation.sid);
   startAutoRefresh();
 }
 
+function getImageObserver() {
+  if (typeof IntersectionObserver === 'undefined') {
+    return null;
+  }
+
+  if (imageObserver) {
+    imageObserver.disconnect();
+    imageObserver = null;
+  }
+
+  imageObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const imgElement = entry.target;
+      const data = imgElement.dataset;
+      if (!data || !data.src) return;
+
+      imageObserver.unobserve(imgElement);
+
+      const placeholder = data.placeholder ? document.getElementById(data.placeholder) : null;
+
+      imgElement.onload = () => {
+        imgElement.style.display = 'block';
+        if (placeholder) {
+          placeholder.style.display = 'none';
+        }
+      };
+
+      imgElement.onerror = () => {
+        if (placeholder) {
+          placeholder.innerHTML = `📷 <a href="${data.src}" target="_blank">${data.filename || 'Image'}</a> (failed to load)`;
+        }
+      };
+
+      imgElement.src = data.src;
+    });
+  }, {
+    root: messagesContainer,
+    rootMargin: '200px 0px',
+    threshold: 0.01
+  });
+
+  return imageObserver;
+}
+
 function renderMessages() {
+  if (imageObserver) {
+    imageObserver.disconnect();
+    imageObserver = null;
+  }
+
   messagesContainer.innerHTML = '';
 
   if (state.messages.length === 0) {
@@ -524,27 +594,39 @@ function renderMessages() {
     messagesContainer.appendChild(messageEl);
   });
 
-  // Load images progressively with delay to avoid overwhelming Chrome
-  imagesToLoad.forEach((imageInfo, index) => {
-    setTimeout(() => {
-      const imgElement = document.getElementById(imageInfo.imgId);
-      const placeholderElement = document.getElementById(`${imageInfo.imgId}-placeholder`);
-
-      if (imgElement && placeholderElement) {
-        imgElement.onload = () => {
-          imgElement.style.display = 'block';
-          placeholderElement.style.display = 'none';
-        };
-        imgElement.onerror = () => {
-          placeholderElement.innerHTML = `📷 <a href="${imageInfo.url}" target="_blank">${imageInfo.filename || 'Image'}</a> (failed to load)`;
-        };
-        imgElement.src = imageInfo.url;
-      }
-    }, index * 100); // Load each image 100ms apart
-  });
+  lazyLoadImages(imagesToLoad);
 
   // Scroll to bottom
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+function lazyLoadImages(imagesToLoad) {
+  if (!imagesToLoad.length) return;
+
+  const observer = getImageObserver();
+  imagesToLoad.forEach(imageInfo => {
+    const imgElement = document.getElementById(imageInfo.imgId);
+    const placeholderElement = document.getElementById(`${imageInfo.imgId}-placeholder`);
+
+    if (!imgElement || !placeholderElement) return;
+
+    if (!observer) {
+      imgElement.onload = () => {
+        imgElement.style.display = 'block';
+        placeholderElement.style.display = 'none';
+      };
+      imgElement.onerror = () => {
+        placeholderElement.innerHTML = `📷 <a href="${imageInfo.url}" target="_blank">${imageInfo.filename || 'Image'}</a> (failed to load)`;
+      };
+      imgElement.src = imageInfo.url;
+      return;
+    }
+
+    imgElement.dataset.src = imageInfo.url;
+    imgElement.dataset.placeholder = placeholderElement.id;
+    imgElement.dataset.filename = imageInfo.filename || '';
+    observer.observe(imgElement);
+  });
 }
 
 function renderAttachmentPreview() {

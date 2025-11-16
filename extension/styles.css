@@ -662,3 +662,30 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(67, 56, 202, 0.9);
 }
+
+/* Unread Indicators */
+.conversation-item.unread {
+  background: linear-gradient(135deg, rgba(74, 99, 207, 0.08), rgba(74, 99, 207, 0.04));
+  border-color: rgba(74, 99, 207, 0.2);
+}
+
+.conversation-item.unread .conversation-name {
+  font-weight: 600;
+  color: var(--accent-dark);
+}
+
+.unread-indicator {
+  color: #ef4444;
+  font-size: 14px;
+  margin-left: 6px;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
