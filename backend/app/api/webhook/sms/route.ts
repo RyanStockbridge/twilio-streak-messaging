@@ -15,9 +15,9 @@ function getTwilioClient() {
 }
 
 /**
- * Finds an existing conversation for a phone number or creates a new one
+ * Finds an existing conversation for a phone number or creates a new one with backfill
  */
-async function findOrCreateConversation(client: any, phoneNumber: string, twilioNumber: string) {
+async function findOrCreateConversation(client: any, phoneNumber: string, twilioNumber: string, backfill = true) {
   try {
     // Search for existing conversations with this phone number
     const conversations = await client.conversations.v1.conversations.list({ limit: 100 });
@@ -33,14 +33,14 @@ async function findOrCreateConversation(client: any, phoneNumber: string, twilio
       );
 
       if (hasPhoneNumber) {
-        return conv;
+        return { conversation: conv, isNew: false };
       }
     }
 
     // No conversation found, create a new one
-    console.log(`Creating new conversation for ${phoneNumber}`);
+    console.log(`Creating new conversation for ${phoneNumber} with backfill=${backfill}`);
     const newConversation = await client.conversations.v1.conversations.create({
-      friendlyName: `SMS with ${phoneNumber}`
+      friendlyName: phoneNumber
     });
 
     // Add the phone number as a participant with proper SMS binding
@@ -52,7 +52,62 @@ async function findOrCreateConversation(client: any, phoneNumber: string, twilio
       });
 
     console.log(`Created conversation ${newConversation.sid} for ${phoneNumber}`);
-    return newConversation;
+
+    // Optionally backfill historical messages (default: last 20)
+    if (backfill) {
+      try {
+        console.log('Backfilling historical messages...');
+
+        // Fetch recent SMS messages
+        const outgoingMessages = await client.messages.list({
+          to: phoneNumber,
+          from: twilioNumber,
+          limit: 20
+        });
+
+        const incomingMessages = await client.messages.list({
+          from: phoneNumber,
+          to: twilioNumber,
+          limit: 20
+        });
+
+        // Combine and sort by date (oldest first)
+        const allMessages = [...outgoingMessages, ...incomingMessages].sort((a: any, b: any) =>
+          new Date(a.dateCreated).getTime() - new Date(b.dateCreated).getTime()
+        );
+
+        console.log(`Found ${allMessages.length} messages to backfill`);
+
+        // Add each message to the conversation
+        for (const msg of allMessages) {
+          try {
+            const author = msg.from === twilioNumber ? 'system' : msg.from;
+
+            await client.conversations.v1
+              .conversations(newConversation.sid)
+              .messages.create({
+                author: author,
+                body: msg.body || '',
+                dateCreated: msg.dateCreated,
+                attributes: JSON.stringify({
+                  originalMessageSid: msg.sid,
+                  direction: msg.direction,
+                  status: msg.status,
+                  backfilled: true
+                })
+              });
+          } catch (msgError: any) {
+            console.error(`Failed to backfill message ${msg.sid}:`, msgError.message);
+          }
+        }
+
+        console.log(`Backfilled ${allMessages.length} messages`);
+      } catch (backfillError) {
+        console.error('Error during backfill (non-fatal):', backfillError);
+      }
+    }
+
+    return { conversation: newConversation, isNew: true };
   } catch (error) {
     console.error('Error finding/creating conversation:', error);
     throw error;
@@ -138,66 +193,79 @@ export async function POST(request: NextRequest) {
     // Get Twilio client
     const client = getTwilioClient();
 
-    // With Autocreate Conversations enabled, Twilio automatically creates the conversation
-    // and adds the message. We just need to find it and add media attributes if present.
-    // Only process if there's media to attach
-    if (numMedia && parseInt(numMedia) > 0) {
-      // Wait 2 seconds for Twilio to auto-create the conversation and add the message
-      await new Promise(resolve => setTimeout(resolve, 2000));
+    // Twilio's Autocreate doesn't always work reliably, so we'll force conversation creation
+    try {
+      // Find or create the conversation for this phone number (with backfill for new conversations)
+      const { conversation, isNew } = await findOrCreateConversation(client, fromNumber, toNumber);
 
-      try {
-        // Find the conversation for this phone number
-        const conversation = await findOrCreateConversation(client, fromNumber, toNumber);
+      console.log(`Using ${isNew ? 'newly created' : 'existing'} conversation ${conversation.sid}`);
 
-        // Get the most recent messages in the conversation
+      // Add the current incoming message to the conversation
+      const messageData: any = {
+        body: messageBody || '',
+        author: fromNumber,
+        attributes: JSON.stringify({
+          MessageSid: messageSid,
+          direction: 'inbound'
+        })
+      };
+
+      // If there's media, add it to the attributes
+      if (numMedia && parseInt(numMedia) > 0) {
+        const mediaAttrs: any = {
+          MessageSid: messageSid,
+          NumMedia: numMedia
+        };
+
+        // Add all MediaUrl and MediaContentType fields
+        for (let i = 0; i < parseInt(numMedia); i++) {
+          const mediaUrlKey = `MediaUrl${i}`;
+          const mediaContentTypeKey = `MediaContentType${i}`;
+
+          if (body[mediaUrlKey]) {
+            mediaAttrs[mediaUrlKey] = body[mediaUrlKey];
+          }
+          if (body[mediaContentTypeKey]) {
+            mediaAttrs[mediaContentTypeKey] = body[mediaContentTypeKey];
+          }
+        }
+
+        messageData.attributes = JSON.stringify(mediaAttrs);
+      }
+
+      // Create the message in the conversation (only if not already backfilled)
+      // We check if this message was already added during backfill
+      if (!isNew) {
+        // For existing conversations, add the new message
+        await client.conversations.v1
+          .conversations(conversation.sid)
+          .messages.create(messageData);
+
+        console.log(`Added new message to existing conversation ${conversation.sid}`);
+      } else {
+        // For new conversations, the message might have been added during backfill
+        // Check if we need to add it
         const recentMessages = await client.conversations.v1
           .conversations(conversation.sid)
           .messages.list({ limit: 5, order: 'desc' });
 
-        // Find the message that matches this SMS
-        const targetMessage = recentMessages.find((m: any) => {
-          // Match by author and body (since Twilio auto-created it)
-          return m.author === fromNumber && m.body === messageBody;
-        });
+        const messageExists = recentMessages.some((m: any) =>
+          m.body === messageBody && m.author === fromNumber
+        );
 
-        if (targetMessage) {
-          // Build media attributes object
-          const mediaAttrs: any = {
-            MessageSid: messageSid,
-            NumMedia: numMedia
-          };
-
-          // Add all MediaUrl and MediaContentType fields
-          for (let i = 0; i < parseInt(numMedia); i++) {
-            const mediaUrlKey = `MediaUrl${i}`;
-            const mediaContentTypeKey = `MediaContentType${i}`;
-
-            if (body[mediaUrlKey]) {
-              mediaAttrs[mediaUrlKey] = body[mediaUrlKey];
-            }
-            if (body[mediaContentTypeKey]) {
-              mediaAttrs[mediaContentTypeKey] = body[mediaContentTypeKey];
-            }
-          }
-
-          // Update the message with media attributes
+        if (!messageExists) {
           await client.conversations.v1
             .conversations(conversation.sid)
-            .messages(targetMessage.sid)
-            .update({
-              attributes: JSON.stringify(mediaAttrs)
-            });
+            .messages.create(messageData);
 
-          console.log(`Updated message ${targetMessage.sid} with media attributes in conversation ${conversation.sid}`);
+          console.log(`Added current message to new conversation ${conversation.sid}`);
         } else {
-          console.log('Could not find auto-created message to update with media');
+          console.log(`Current message already exists in conversation (from backfill)`);
         }
-      } catch (error) {
-        console.error('Error updating message with media attributes:', error);
       }
-    } else {
-      // No media - just let Twilio's autocreate handle everything
-      console.log('No media present, Twilio autocreate will handle the message');
+    } catch (error) {
+      console.error('Error creating conversation/message:', error);
+      // Don't fail the webhook - still return success to Twilio
     }
 
     // Return TwiML response (required for Twilio webhooks)
@@ -244,8 +312,8 @@ export async function PUT(request: NextRequest) {
     // Get Twilio client
     const client = getTwilioClient();
 
-    // Find or create conversation for this phone number
-    const conversation = await findOrCreateConversation(client, to, from);
+    // Find or create conversation for this phone number (no backfill for outgoing)
+    const { conversation } = await findOrCreateConversation(client, to, from, false);
 
     // Add the message to the conversation
     const sentMessage = await client.conversations.v1
