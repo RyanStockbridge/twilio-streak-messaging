@@ -20,7 +20,9 @@ const state = {
   hasMoreConversations: true,
   autoRefreshInterval: null,
   autoRefreshEnabled: true,
-  pendingMedia: []
+  pendingMedia: [],
+  pendingConversationSid: null,
+  isLoadingConversations: false
 };
 
 // DOM Elements
@@ -238,7 +240,12 @@ function buildMediaUrl(url) {
 }
 
 async function loadConversations(append = false) {
+  if (state.isLoadingConversations) {
+    return;
+  }
+
   try {
+    state.isLoadingConversations = true;
     showLoading(true);
 
     if (!append) {
@@ -272,10 +279,12 @@ async function loadConversations(append = false) {
     }
 
     renderConversationList();
+    tryOpenPendingConversation();
   } catch (error) {
     console.error('Error loading conversations:', error);
     showToast('Failed to load conversations. Please check your backend connection.', 'error');
   } finally {
+    state.isLoadingConversations = false;
     showLoading(false);
   }
 }
@@ -475,6 +484,30 @@ function selectConversation(conversation) {
 
   loadMessages(conversation.sid);
   startAutoRefresh();
+}
+
+function tryOpenPendingConversation() {
+  if (!state.pendingConversationSid) return;
+  const pending = state.conversations.find(conv => conv.sid === state.pendingConversationSid);
+  if (pending) {
+    selectConversation(pending);
+    state.pendingConversationSid = null;
+  }
+}
+
+function focusConversationBySid(conversationSid) {
+  if (!conversationSid) return;
+  const existing = state.conversations.find(conv => conv.sid === conversationSid);
+  if (existing) {
+    selectConversation(existing);
+    state.pendingConversationSid = null;
+    return;
+  }
+
+  state.pendingConversationSid = conversationSid;
+  if (!state.isLoadingConversations) {
+    loadConversations();
+  }
 }
 
 function getImageObserver() {
@@ -853,3 +886,11 @@ init();
 
 document.addEventListener('visibilitychange', handleVisibilityChange);
 window.addEventListener('beforeunload', stopAutoRefresh);
+
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((request) => {
+    if (request.type === 'FOCUS_CONVERSATION' && request.conversationSid) {
+      focusConversationBySid(request.conversationSid);
+    }
+  });
+}

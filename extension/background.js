@@ -1,220 +1,184 @@
 // Background service worker for the extension
 
-const ALARM_NAME = 'checkNewMessages';
-const CHECK_INTERVAL_MINUTES = 1; // Check every minute
+const POLL_ALARM = 'twilioNotificationPoll';
+const POLL_INTERVAL_MINUTES = 1;
 
-// Open side panel when extension icon is clicked
+const notificationState = {
+  backendUrl: null,
+  apiKey: null,
+  lastTimestamp: null,
+  pendingNotifications: {}
+};
+
 chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ windowId: tab.windowId });
 });
 
-// Listen for messages from the side panel
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'OPEN_SIDE_PANEL') {
     chrome.sidePanel.open({ windowId: sender.tab.windowId });
-  } else if (request.type === 'MARK_CONVERSATION_READ') {
-    // Mark conversation as read in storage
-    markConversationAsRead(request.conversationSid).then(() => {
-      sendResponse({ success: true });
-    });
-    return true; // Keep message channel open for async response
   }
   return true;
 });
 
-// Set up alarm when extension is installed or updated
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('[Background] Extension installed/updated, setting up alarm');
-  setupAlarm();
-});
-
-// Set up alarm when service worker starts
-chrome.runtime.onStartup.addListener(() => {
-  console.log('[Background] Chrome started, setting up alarm');
-  setupAlarm();
-});
-
-// Listen for alarm
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === ALARM_NAME) {
-    console.log('[Background] Alarm triggered, checking for new messages');
-    checkForNewMessages();
-  }
-});
-
-// Set up periodic alarm
-function setupAlarm() {
-  chrome.alarms.create(ALARM_NAME, {
-    periodInMinutes: CHECK_INTERVAL_MINUTES,
-    delayInMinutes: CHECK_INTERVAL_MINUTES
-  });
-  console.log(`[Background] Alarm created to check every ${CHECK_INTERVAL_MINUTES} minute(s)`);
+function normalizeBackendUrl(url) {
+  if (!url) return null;
+  return url.replace(/\/$/, '');
 }
 
-// Main function to check for new messages
-async function checkForNewMessages() {
+function buildPollUrl() {
+  if (!notificationState.backendUrl) return null;
   try {
-    console.log('[Background] Starting message check...');
-
-    // Get credentials from storage
-    const saved = await chrome.storage.local.get([
-      'backendUrl',
-      'apiKey',
-      'lastKnownConversations'
-    ]);
-
-    if (!saved.backendUrl) {
-      console.log('[Background] No backend URL configured, skipping check');
-      return;
+    const url = new URL('/api/notifications/poll', notificationState.backendUrl);
+    if (notificationState.apiKey) {
+      url.searchParams.set('apiKey', notificationState.apiKey);
     }
-
-    // Fetch current conversations
-    const headers = {};
-    if (saved.apiKey) {
-      headers['x-api-key'] = saved.apiKey;
+    if (notificationState.lastTimestamp) {
+      url.searchParams.set('since', notificationState.lastTimestamp);
     }
+    return url.toString();
+  } catch (error) {
+    console.error('Invalid backend URL for notification polling:', error);
+    return null;
+  }
+}
 
-    const response = await fetch(`${saved.backendUrl}/api/conversations?limit=50`, {
-      headers
+function scheduleAlarm() {
+  chrome.alarms.clear(POLL_ALARM, () => {
+    if (!notificationState.backendUrl) return;
+    chrome.alarms.create(POLL_ALARM, {
+      periodInMinutes: POLL_INTERVAL_MINUTES
+    });
+  });
+}
+
+async function pollNotifications() {
+  const pollUrl = buildPollUrl();
+  if (!pollUrl) return;
+
+  try {
+    const response = await fetch(pollUrl, {
+      headers: {
+        Accept: 'application/json'
+      }
     });
 
     if (!response.ok) {
-      console.error('[Background] Failed to fetch conversations:', response.status);
-      return;
+      throw new Error(`Notification poll failed: ${response.status}`);
     }
 
     const data = await response.json();
-    const currentConversations = data.conversations || [];
+    const events = Array.isArray(data.events) ? data.events : [];
 
-    console.log(`[Background] Fetched ${currentConversations.length} conversations`);
-
-    // Get last known state
-    const lastKnown = saved.lastKnownConversations || {};
-
-    // Track new/updated conversations
-    const updates = [];
-
-    for (const conv of currentConversations) {
-      const lastKnownConv = lastKnown[conv.sid];
-
-      const currentTime = new Date(conv.dateUpdated).getTime();
-
-      if (!lastKnownConv) {
-        // New conversation - don't notify on first discovery (could be old)
-        console.log(`[Background] New conversation discovered (no notification): ${conv.sid}`);
-      } else {
-        const lastKnownTime = new Date(lastKnownConv.dateUpdated).getTime();
-
-        // Check if conversation has been updated since last check
-        if (currentTime > lastKnownTime) {
-          console.log(`[Background] ✓ Conversation updated: ${conv.sid}`);
-
-          updates.push({
-            sid: conv.sid,
-            contactName: conv.friendlyName || 'Unknown',
-            isNew: false
-          });
-        }
-      }
+    if (!events.length) {
+      return;
     }
 
-    // Show notifications for updates
-    if (updates.length > 0) {
-      console.log(`[Background] ${updates.length} conversation(s) with updates`);
-
-      // Track which conversations have unread messages
-      const saved2 = await chrome.storage.local.get(['unreadConversations']);
-      const unreadConversations = new Set(saved2.unreadConversations || []);
-
-      for (const update of updates) {
-        await showNotification(update);
-        // Mark this conversation as unread
-        unreadConversations.add(update.sid);
+    events.forEach(event => {
+      if (event.type !== 'incoming_message') {
+        return;
       }
 
-      // Save unread conversations
-      await chrome.storage.local.set({
-        unreadConversations: Array.from(unreadConversations)
-      });
+      notificationState.lastTimestamp = event.timestamp;
+      chrome.storage.local.set({ lastNotificationTimestamp: event.timestamp });
 
-      // Update badge with unread count
-      await updateBadge(unreadConversations.size);
-    } else {
-      console.log('[Background] No new messages');
-    }
-
-    // Save current state as last known
-    const newLastKnown = {};
-    currentConversations.forEach(conv => {
-      newLastKnown[conv.sid] = {
-        dateUpdated: conv.dateUpdated,
-        friendlyName: conv.friendlyName
+      const notificationId = `msg-${event.payload?.conversationSid || ''}-${Date.now()}`;
+      notificationState.pendingNotifications[notificationId] = {
+        conversationSid: event.payload?.conversationSid || null
       };
+
+      const title = event.payload?.from || 'New message';
+      const message = event.payload?.body || 'New message received.';
+
+      chrome.notifications.create(notificationId, {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title,
+        message,
+        priority: 1
+      });
     });
-
-    await chrome.storage.local.set({ lastKnownConversations: newLastKnown });
-    console.log('[Background] Saved conversation state');
-
   } catch (error) {
-    console.error('[Background] Error checking for new messages:', error);
+    console.error('Notification polling error:', error);
   }
 }
 
-// Show notification for new/updated conversation
-async function showNotification(update) {
-  const title = update.isNew ? 'New conversation' : 'New message';
-  const message = `From ${update.contactName}`;
+function updateSettings(newSettings) {
+  const backendUrl = normalizeBackendUrl(newSettings.backendUrl);
+  const apiKey = newSettings.apiKey || null;
 
-  console.log(`[Background] Creating notification: ${title} - ${message}`);
+  notificationState.backendUrl = backendUrl;
+  notificationState.apiKey = apiKey;
 
-  await chrome.notifications.create(update.sid, {
-    type: 'basic',
-    iconUrl: 'icons/icon128.png',
-    title: title,
-    message: message,
-    priority: 2,
-    requireInteraction: false
-  });
+  if (!notificationState.lastTimestamp && newSettings.lastNotificationTimestamp) {
+    notificationState.lastTimestamp = newSettings.lastNotificationTimestamp;
+  }
 
-  console.log(`[Background] Notification created for ${update.sid}`);
-}
-
-// Update badge count
-async function updateBadge(count) {
-  if (count > 0) {
-    chrome.action.setBadgeText({ text: count.toString() });
-    chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+  if (backendUrl) {
+    scheduleAlarm();
+    pollNotifications();
   } else {
-    chrome.action.setBadgeText({ text: '' });
+    chrome.alarms.clear(POLL_ALARM);
   }
 }
 
-// Mark conversation as read
-async function markConversationAsRead(conversationSid) {
-  try {
-    const saved = await chrome.storage.local.get(['unreadConversations']);
-    let unreadConversations = saved.unreadConversations || [];
+chrome.storage.local.get(['backendUrl', 'apiKey', 'lastNotificationTimestamp'], (items) => {
+  updateSettings(items);
+});
 
-    // Remove from unread list
-    unreadConversations = unreadConversations.filter(sid => sid !== conversationSid);
-
-    await chrome.storage.local.set({ unreadConversations });
-
-    // Update badge count
-    await updateBadge(unreadConversations.length);
-
-    console.log(`[Background] Marked conversation ${conversationSid} as read`);
-  } catch (error) {
-    console.error('[Background] Error marking conversation as read:', error);
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') return;
+  if ('backendUrl' in changes || 'apiKey' in changes) {
+    chrome.storage.local.get(['backendUrl', 'apiKey', 'lastNotificationTimestamp'], (items) => {
+      updateSettings(items);
+    });
   }
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.get(['backendUrl', 'apiKey', 'lastNotificationTimestamp'], (items) => {
+    updateSettings(items);
+  });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.get(['backendUrl', 'apiKey', 'lastNotificationTimestamp'], (items) => {
+    updateSettings(items);
+  });
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === POLL_ALARM) {
+    pollNotifications();
+  }
+});
+
+function openConversationFromNotification(info) {
+  chrome.windows.getCurrent((windowInfo) => {
+    chrome.sidePanel.open({ windowId: windowInfo.id }).then(() => {
+      if (info.conversationSid) {
+        setTimeout(() => {
+          chrome.runtime.sendMessage({
+            type: 'FOCUS_CONVERSATION',
+            conversationSid: info.conversationSid
+          });
+        }, 300);
+      }
+    });
+  });
 }
 
-// Initialize on load
-console.log('[Background] Service worker loaded');
-setupAlarm();
+chrome.notifications.onClicked.addListener((notificationId) => {
+  const info = notificationState.pendingNotifications[notificationId];
+  if (info) {
+    openConversationFromNotification(info);
+    delete notificationState.pendingNotifications[notificationId];
+  }
+  chrome.notifications.clear(notificationId);
+});
 
-// Do an immediate check on startup (after a short delay to let things initialize)
-setTimeout(() => {
-  console.log('[Background] Performing initial message check');
-  checkForNewMessages();
-}, 5000); // 5 second delay
+chrome.notifications.onClosed.addListener((notificationId) => {
+  if (notificationState.pendingNotifications[notificationId]) {
+    delete notificationState.pendingNotifications[notificationId];
+  }
+});
