@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
-import { recordNotification } from '@/lib/notification-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -141,8 +140,6 @@ export async function POST(request: NextRequest) {
 
     // With Autocreate Conversations enabled, Twilio automatically creates the conversation
     // and adds the message. We just need to find it and add media attributes if present.
-    let conversation: any | null = null;
-
     // Only process if there's media to attach
     if (numMedia && parseInt(numMedia) > 0) {
       // Wait 2 seconds for Twilio to auto-create the conversation and add the message
@@ -150,7 +147,7 @@ export async function POST(request: NextRequest) {
 
       try {
         // Find the conversation for this phone number
-        conversation = await findOrCreateConversation(client, fromNumber, toNumber);
+        const conversation = await findOrCreateConversation(client, fromNumber, toNumber);
 
         // Get the most recent messages in the conversation
         const recentMessages = await client.conversations.v1
@@ -202,25 +199,6 @@ export async function POST(request: NextRequest) {
       // No media - just let Twilio's autocreate handle everything
       console.log('No media present, Twilio autocreate will handle the message');
     }
-
-    if (!conversation) {
-      try {
-        conversation = await findOrCreateConversation(client, fromNumber, toNumber);
-      } catch (error) {
-        console.error('Failed to lookup conversation after webhook:', error);
-      }
-    }
-
-    recordNotification({
-      type: 'incoming_message',
-      payload: {
-        from: fromNumber,
-        to: toNumber,
-        body: messageBody || '',
-        conversationSid: conversation?.sid || null,
-        hasMedia: Boolean(numMedia && parseInt(numMedia) > 0)
-      }
-    });
 
     // Return TwiML response (required for Twilio webhooks)
     return new NextResponse(
